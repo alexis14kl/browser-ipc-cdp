@@ -152,15 +152,27 @@ async function main() {
 
   // Resumen
   console.log('');
+  // URL correcta segun entorno
+  const cdpLocalUrl = `http://127.0.0.1:${port}`;
+  const cdpWslUrl = `http://${wslIp}:${port}`;
+  const cdpUrl = (IS_WSL || wslIp !== '127.0.0.1') ? cdpWslUrl : cdpLocalUrl;
+
   console.log('='.repeat(55));
   console.log(`  MODO:        ${mode}${mode === 'ATTACHED' ? ' (sin reiniciar)' : ' (nuevo proceso)'}`);
+  console.log(`  Plataforma:  ${platform}`);
   console.log(`  Navegador:   ${browserVersion}`);
   console.log(`  Puerto CDP:  ${port} (dinamico via IPC)`);
   console.log(`  Paginas:     ${pages}`);
-  console.log(`  WSL IP:      ${wslIp}`);
-  console.log(`  Portproxy:   0.0.0.0:${port} -> 127.0.0.1:${port}`);
-  console.log(`  .mcp.json:   Actualizado`);
   console.log('='.repeat(55));
+  console.log('');
+  console.log('  URLs de conexion:');
+  console.log(`    Desde Windows: ${cdpLocalUrl}`);
+  if (wslIp !== '127.0.0.1') {
+    console.log(`    Desde WSL:     ${cdpWslUrl}`);
+  }
+  console.log('');
+  console.log('  MCP configurado en .mcp.json:');
+  console.log(`    browserUrl: ${cdpUrl}`);
   console.log('');
   console.log('  Siguiente paso en Claude Code:');
   console.log('    /mcp   (para conectar el MCP brave)');

@@ -12,6 +12,23 @@ version: 1.0.0
 
 ---
 
+## REGLA CRITICA: URL segun entorno
+
+**El MCP de Brave usa diferentes URLs segun donde corra Claude Code:**
+
+| Entorno | URL del MCP |
+|---------|-------------|
+| **WSL** (Claude Code en WSL) | `http://HOST_IP:PUERTO` (ej: `http://172.20.176.1:57108`) |
+| **Windows** (Claude Code nativo) | `http://127.0.0.1:PUERTO` |
+| **Mac/Linux** | `http://127.0.0.1:PUERTO` |
+
+**Si el MCP falla con "Could not connect":**
+1. Leer `cdp_info.json` → verificar el puerto y `WSL_IP`
+2. Si estas en WSL, usar la IP del campo `WSL_IP`, NO `127.0.0.1`
+3. Verificar portproxy: `cmd.exe /c netsh interface portproxy show all`
+
+---
+
 ## PASO 1: Verificar si Brave CDP ya esta activo
 
 Leer el archivo `cdp_info.json` para obtener el puerto actual:
@@ -20,10 +37,14 @@ Leer el archivo `cdp_info.json` para obtener el puerto actual:
 cat /mnt/c/Users/NyGsoft/Desktop/ipc/cdp_info.json
 ```
 
-Si existe y tiene un puerto, verificar si CDP responde:
+El archivo contiene `WSL_IP` y `DEBUG_PORT`. Usar para verificar:
 
 ```bash
-curl -s --connect-timeout 3 http://WINDOWS_HOST_IP:PUERTO/json/version
+# Desde WSL: usar WSL_IP del cdp_info.json
+curl -s --connect-timeout 3 http://WSL_IP:PUERTO/json/version
+
+# Desde Windows: usar localhost
+curl -s --connect-timeout 3 http://127.0.0.1:PUERTO/json/version
 ```
 
 Para obtener la IP de Windows desde WSL:
