@@ -12,7 +12,7 @@
  *   npx browser-ipc-cdp --status         # Ver estado actual
  *   npx browser-ipc-cdp --uninstall      # Desinstalar
  */
-const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP } = require('../lib/browser');
+const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP, IS_WSL, IS_WIN, IS_MAC } = require('../lib/browser');
 const { setupPortproxy, setupFirewall } = require('../lib/network');
 const { updateMcpJson, getWslHostIp } = require('../lib/mcp');
 const { saveCdpInfo, loadCdpInfo } = require('../lib/config');
@@ -30,6 +30,8 @@ for (let i = 0; i < args.length; i++) {
 
 async function main() {
   banner();
+  const platform = IS_WIN ? 'Windows' : IS_WSL ? 'WSL (Windows host)' : IS_MAC ? 'macOS' : 'Linux';
+  log(`Plataforma: ${platform}`);
 
   // --list: listar navegadores
   if (flags.list) {
