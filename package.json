@@ -1,6 +1,6 @@
 {
   "name": "browser-ipc-cdp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Control remoto de navegadores Chromium (Brave, Chrome, Edge) via IPC + CDP dinamico. Un comando para conectar Claude Code a tu navegador real.",
   "bin": {
     "browser-ipc-cdp": "bin/cli.js"
