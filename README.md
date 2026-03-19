@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Brave IPC CDP - Documentacion
 
 ## Que es esto?
@@ -260,3 +261,7 @@ Todo sin necesidad de login adicional — usa tus sesiones activas.
 
 7. Listo! Claude Code controla tu Brave real
 ```
+=======
+# browser-ipc-cdp
+browser-ipc-cdp — Control remoto de navegadores Chromium (Brave, Chrome, Edge) via IPC con CDP dinámico. Abre tu   navegador real con todas tus sesiones, detecta o asigna puerto automáticamente, configura portproxy/firewall para WSL,    y actualiza el MCP de Claude Code. Sin puertos fijos, sin hacks de registry, sin configuración manual.
+>>>>>>> 3ba8518eefb0a7bab267193cab6800ebc9fda58b
