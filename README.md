@@ -43,6 +43,25 @@ Despues `/mcp` en Claude Code y listo. El wrapper resuelve el puerto dinamico so
 
 ---
 
+## ⚠️ Uso responsable
+
+Esta herramienta esta destinada a **testing personal, automatizacion propia y desarrollo**. El usuario es responsable de:
+
+- Usarla solo en navegadores y cuentas que le pertenecen
+- Cumplir con los Terms of Service de los sitios que automatice
+- Respetar leyes locales sobre privacidad y acceso a sistemas
+
+**NO se autoriza el uso para:**
+
+- Acceso no autorizado a sistemas ajenos
+- Scraping que viole ToS de un servicio
+- Bypass de protecciones de seguridad sin permiso del owner
+- Automatizacion de cuentas de terceros sin consentimiento
+
+Distribuida bajo licencia **MIT** — el autor (`Alexis Malambo`) no se hace responsable del mal uso por terceros (clausula `AS IS, WITHOUT WARRANTY OF ANY KIND`).
+
+---
+
 # Documentacion
 
 ## Que es esto?
