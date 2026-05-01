@@ -2,6 +2,45 @@
 
 Control remoto de navegadores Chromium (Brave, Chrome, Edge) via IPC con CDP dinamico. Abre tu navegador real con todas tus sesiones, detecta o asigna puerto automaticamente, configura portproxy/firewall para WSL, y actualiza el MCP de Claude Code. Sin puertos fijos, sin hacks de registry, sin configuracion manual.
 
+```bash
+npm i browser-ipc-cdp
+npx browser-ipc-cdp
+```
+
+Despues `/mcp` en Claude Code y listo. El wrapper resuelve el puerto dinamico solo, no hay que reescribir `.mcp.json` cuando cambia.
+
+---
+
+## Por que usarlo
+
+- **Mantiene tus sesiones reales**: cookies, 2FA, extensiones, tabs abiertas — nada se pierde
+- **Pasa Cloudflare sin captcha**: usa tu cookie `cf_clearance` ya validada, no parece bot
+- **Cross-browser**: Brave, Chrome, Edge, Chromium
+- **Puerto dinamico**: cero conflictos, OS asigna puerto libre via DevToolsActivePort IPC
+- **Auto-config WSL**: portproxy + firewall + .mcp.json sin pasos manuales
+- **DevTools completo**: Network, Console, Performance, Lighthouse, Coverage, Heap snapshots
+
+---
+
+## Acceso completo a Red (CDP)
+
+`browser-ipc-cdp` expone el subsistema **Network** del navegador. Cualquier request HTTP/HTTPS, WebSocket, XHR o fetch se puede observar, interceptar, modificar o bloquear.
+
+| Capacidad | Metodo CDP |
+|-----------|------------|
+| Listar requests | `Network.requestWillBeSent` |
+| Leer body response | `Network.getResponseBody` |
+| Modificar headers | `Network.setExtraHTTPHeaders` |
+| Bloquear URLs (ads/tracking) | `Network.setBlockedURLs` |
+| Mock responses | `Fetch.fulfillRequest` |
+| Interceptar requests | `Fetch.requestPaused` |
+| Throttling (3G/offline) | `Network.emulateNetworkConditions` |
+| Cookies CRUD | `Network.getCookies` / `setCookie` / `deleteCookies` |
+| Espiar WebSockets | `Network.webSocketFrameSent/Received` |
+| Auth challenge | `Fetch.authRequired` |
+
+**[📖 Documentacion completa de Network + ejemplos](docs/CDP_NETWORK.md)**
+
 ---
 
 # Documentacion
