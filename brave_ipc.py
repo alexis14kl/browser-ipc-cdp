@@ -412,12 +412,17 @@ def get_wsl_host_ip() -> str:
 
 
 def update_mcp_json(port: int) -> bool:
-    """Actualiza el puerto del MCP 'brave' en todos los .mcp.json relevantes."""
+    """Actualiza el MCP 'brave' apuntando al wrapper Node dinamico.
+
+    El wrapper (brave_mcp_launcher.js) lee cdp_info.json en cada invocacion,
+    asi el puerto siempre esta fresco sin reescribir .mcp.json.
+    """
     wsl_host_ip = get_wsl_host_ip()
+    wrapper_path = str(Path(__file__).parent / "brave_mcp_launcher.js")
 
     brave_entry = {
-        "command": "npx",
-        "args": ["-y", "chrome-devtools-mcp@latest", "--browserUrl", f"http://{wsl_host_ip}:{port}"]
+        "command": "node",
+        "args": [wrapper_path]
     }
 
     # Actualizar ambos .mcp.json: el del home y el del proyecto IPC
