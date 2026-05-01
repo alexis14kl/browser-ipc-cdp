@@ -34,7 +34,9 @@
   "files": [
     "bin/",
     "lib/",
-    "templates/",
+    "brave_ipc.py",
+    "brave_mcp_launcher.js",
+    "brave_cdp.bat",
     "README.md",
     "LICENSE"
   ]
