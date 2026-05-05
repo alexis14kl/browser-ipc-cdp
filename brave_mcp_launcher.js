@@ -51,14 +51,51 @@ function readCdpInfo() {
   return null;
 }
 
-function getHostIP() {
-  if (IS_WIN) return '127.0.0.1';
+function getHostCandidates() {
+  if (IS_WIN) return ['127.0.0.1'];
+
+  const seen = new Set();
+  const candidates = [];
+  const add = (ip) => { if (ip && !seen.has(ip)) { seen.add(ip); candidates.push(ip); } };
+
+  // 1. Gateway IP via /proc/net/route — IP real del host Windows en WSL2 NAT
+  try {
+    const route = fs.readFileSync('/proc/net/route', 'utf-8');
+    for (const line of route.split('\n').slice(1)) {
+      const parts = line.split(/\s+/);
+      if (parts[1] === '00000000' && parts[2] && parts[2] !== '00000000') {
+        const hex = parts[2];
+        add([
+          parseInt(hex.slice(6, 8), 16),
+          parseInt(hex.slice(4, 6), 16),
+          parseInt(hex.slice(2, 4), 16),
+          parseInt(hex.slice(0, 2), 16),
+        ].join('.'));
+        break;
+      }
+    }
+  } catch (e) {}
+
+  // 2. Localhost (WSL2 mirrored networking mode)
+  add('127.0.0.1');
+
+  // 3. Nameservers de /etc/resolv.conf (último recurso)
   try {
     const resolv = fs.readFileSync('/etc/resolv.conf', 'utf-8');
-    const match = resolv.match(/nameserver\s+(\d+\.\d+\.\d+\.\d+)/);
-    if (match) return match[1];
+    const re = /nameserver\s+(\d+\.\d+\.\d+\.\d+)/g;
+    let m;
+    while ((m = re.exec(resolv))) add(m[1]);
   } catch (e) {}
-  return '127.0.0.1';
+
+  return candidates;
+}
+
+async function tryCandidates(port, candidates, timeoutMs) {
+  for (const host of candidates) {
+    const url = `http://${host}:${port}`;
+    if (await testCdp(url, timeoutMs)) return url;
+  }
+  return null;
 }
 
 function testCdp(url, timeoutMs = 3000) {
@@ -76,28 +113,21 @@ function testCdp(url, timeoutMs = 3000) {
 }
 
 async function ensureCdpReady() {
-  const hostIP = getHostIP();
+  const candidates = getHostCandidates();
+  logErr(`Candidatos host: ${candidates.join(', ')}`);
   let info = readCdpInfo();
   let port = info && info.DEBUG_PORT;
 
-  // Intento 1: CDP responde con puerto del cdp_info.json
+  // Intento 1: probar candidatos con el puerto en cdp_info.json
   if (port) {
-    const url = `http://${hostIP}:${port}`;
-    if (await testCdp(url)) {
+    const url = await tryCandidates(port, candidates, 3000);
+    if (url) {
       logErr(`CDP activo en ${url}`);
       return url;
     }
-    // Intento 2: localhost (caso Windows nativo)
-    if (hostIP !== '127.0.0.1') {
-      const localUrl = `http://127.0.0.1:${port}`;
-      if (await testCdp(localUrl)) {
-        logErr(`CDP activo en ${localUrl} (fallback localhost)`);
-        return localUrl;
-      }
-    }
   }
 
-  // Intento 3: auto-launch via brave_ipc.py
+  // Intento 2: auto-launch via brave_ipc.py
   logErr('CDP no responde. Auto-lanzando Brave via brave_ipc.py...');
   if (!fs.existsSync(BRAVE_IPC_PY)) {
     logErr(`brave_ipc.py no encontrado en ${BRAVE_IPC_PY}`);
@@ -115,19 +145,14 @@ async function ensureCdpReady() {
     logErr(`Auto-launch fallo: ${e.message}`);
   }
 
-  // Releer y reverificar
+  // Releer y reverificar contra todos los candidatos
   info = readCdpInfo();
   port = info && info.DEBUG_PORT;
   if (port) {
-    const url = `http://${hostIP}:${port}`;
-    if (await testCdp(url, 5000)) {
+    const url = await tryCandidates(port, candidates, 5000);
+    if (url) {
       logErr(`CDP activo despues de auto-launch en ${url}`);
       return url;
-    }
-    const localUrl = `http://127.0.0.1:${port}`;
-    if (await testCdp(localUrl, 5000)) {
-      logErr(`CDP activo despues de auto-launch en ${localUrl}`);
-      return localUrl;
     }
   }
 
