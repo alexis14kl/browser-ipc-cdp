@@ -17,10 +17,11 @@
  *
  * Flujo:
  *   1. Lee cdp_info.json -> puerto candidato
- *   2. Verifica CDP (curl /json/version) en hostIP:puerto
+ *   2. Verifica CDP (/json/version) en hostIP:puerto
  *   3. Si responde -> lanza chrome-devtools-mcp con ese URL
- *   4. Si NO responde -> ejecuta brave_ipc.py --no-kill (auto-launch)
- *   5. Releer cdp_info.json + reverificar -> conectar
+ *   4. Si stale -> auto-discovery via tasklist+netstat de procesos Chromium
+ *   5. Si encuentra port vivo -> reescribe cdp_info.json y conecta
+ *   6. Ultimo recurso -> brave_ipc.py --no-kill (auto-launch)
  */
 const { execSync, spawn, spawnSync } = require('child_process');
 const fs = require('fs');
@@ -112,6 +113,90 @@ function testCdp(url, timeoutMs = 3000) {
   });
 }
 
+/**
+ * Descubre el puerto CDP real de cualquier proceso Chromium activo.
+ * Usa tasklist (PIDs por imagen) + netstat (LISTENING por PID) y
+ * prueba /json/version en cada candidato.
+ *
+ * Retorna { port, version } si encuentra uno vivo, o null.
+ */
+async function discoverBrowserCdp() {
+  if (!IS_WIN) return null;
+
+  const images = ['brave.exe', 'chrome.exe', 'msedge.exe', 'chromium.exe'];
+  const pids = new Set();
+
+  for (const img of images) {
+    try {
+      const out = execSync(
+        `tasklist /FI "IMAGENAME eq ${img}" /FO CSV /NH`,
+        { encoding: 'utf-8', timeout: 8000, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }
+      );
+      for (const line of out.split('\n')) {
+        const parts = line.trim().split('","');
+        if (parts.length >= 2) {
+          const pid = parseInt(parts[1].replace(/"/g, ''), 10);
+          if (Number.isFinite(pid) && pid > 0) pids.add(pid);
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (pids.size === 0) {
+    logErr('Auto-discovery: ningun proceso Chromium corriendo');
+    return null;
+  }
+
+  let netstatOut = '';
+  try {
+    netstatOut = execSync('netstat -ano', {
+      encoding: 'utf-8', timeout: 20000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch (e) {
+    logErr(`Auto-discovery netstat fallo: ${e.message}`);
+    return null;
+  }
+
+  const ports = new Set();
+  for (const line of netstatOut.split('\n')) {
+    const tokens = line.trim().split(/\s+/);
+    if (tokens.length < 5 || tokens[0] !== 'TCP' || !tokens[3].includes('LISTENING')) continue;
+    const pid = parseInt(tokens[4], 10);
+    if (!pids.has(pid)) continue;
+    const m = tokens[1].match(/:(\d+)$/);
+    if (!m) continue;
+    const port = parseInt(m[1], 10);
+    if (port > 1024 && port < 65536) ports.add(port);
+  }
+
+  logErr(`Auto-discovery: ${ports.size} ports candidatos de ${pids.size} procesos`);
+
+  for (const port of ports) {
+    const version = await testCdp(`http://127.0.0.1:${port}`, 1500);
+    if (version) {
+      logErr(`Auto-discovery: CDP vivo en puerto ${port}`);
+      return { port, version };
+    }
+  }
+
+  return null;
+}
+
+function rewriteCdpInfo(port, version) {
+  const ws = (version && version.webSocketDebuggerUrl) || '';
+  const browser = (version && version.Browser) || 'Unknown';
+  const data = {
+    DEBUG_PORT: port,
+    DEBUG_WS: ws,
+    BROWSER: browser,
+    CDP_URL: `http://127.0.0.1:${port}`,
+    MODE: 'AUTO_DISCOVERED',
+  };
+  for (const p of [HOME_CDP_INFO, CDP_INFO]) {
+    try { fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf-8'); } catch (e) {}
+  }
+}
+
 async function ensureCdpReady() {
   const candidates = getHostCandidates();
   logErr(`Candidatos host: ${candidates.join(', ')}`);
@@ -125,9 +210,21 @@ async function ensureCdpReady() {
       logErr(`CDP activo en ${url}`);
       return url;
     }
+    logErr(`Puerto ${port} de cdp_info.json stale. Auto-discovery...`);
   }
 
-  // Intento 2: auto-launch via brave_ipc.py
+  // Intento 2: auto-discovery via tasklist+netstat (no reinicia browser)
+  const discovered = await discoverBrowserCdp();
+  if (discovered) {
+    rewriteCdpInfo(discovered.port, discovered.version);
+    const url = await tryCandidates(discovered.port, candidates, 3000);
+    if (url) {
+      logErr(`CDP descubierto y cdp_info.json actualizado: ${url}`);
+      return url;
+    }
+  }
+
+  // Intento 3: auto-launch via brave_ipc.py
   logErr('CDP no responde. Auto-lanzando Brave via brave_ipc.py...');
   if (!fs.existsSync(BRAVE_IPC_PY)) {
     logErr(`brave_ipc.py no encontrado en ${BRAVE_IPC_PY}`);
