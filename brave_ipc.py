@@ -539,11 +539,18 @@ def launch_browser_ipc(
             print()
             return result
         else:
-            # Navegador corriendo pero SIN CDP → hay que reiniciar
-            print(f"        CDP no detectado. Reiniciando {browser_name} con CDP...")
+            # Navegador corriendo pero SIN CDP
             if kill_existing:
+                print(f"        CDP no detectado. Reiniciando {browser_name} con CDP...")
                 kill_browser(browser_exe)
                 time.sleep(2)
+            else:
+                # --no-kill activo. No podemos reusar user-data-dir real (lock).
+                # Forzar perfil separado para evitar conflicto.
+                print(f"        CDP no detectado. --no-kill activo: lanzando 2da")
+                print(f"        instancia en perfil separado (no toca tu sesion).")
+                clean = True
+                USER_DATA_DIR = CLEAN_USER_DATA
     elif kill_existing:
         print(f"        {browser_name} no esta corriendo.")
 

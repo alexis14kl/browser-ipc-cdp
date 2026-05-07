@@ -1,0 +1,10 @@
+cdp_info.json
+browser_config.json
+.mcp.json
+*.txt
+node_modules/
+.git/
+.gitignore
+.claude/
+docs/
+templates/
