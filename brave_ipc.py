@@ -418,11 +418,12 @@ def update_mcp_json(port: int) -> bool:
     asi el puerto siempre esta fresco sin reescribir .mcp.json.
     """
     wsl_host_ip = get_wsl_host_ip()
-    wrapper_path = str(Path(__file__).parent / "brave_mcp_launcher.js")
 
+    # Portable: npx resuelve el bin desde global o local install.
+    # Funciona tanto con `npm i -g` como con `npm i` en proyecto.
     brave_entry = {
-        "command": "node",
-        "args": [wrapper_path]
+        "command": "npx",
+        "args": ["-y", "browser-ipc-cdp-mcp"]
     }
 
     # Actualizar ambos .mcp.json: el del home y el del proyecto IPC
