@@ -31,11 +31,23 @@ const HOME = process.env.USERPROFILE || process.env.HOME || '';
 const LOCALAPPDATA = process.env.LOCALAPPDATA || path.join(HOME, 'AppData', 'Local');
 
 const USER_DATA_DIRS = [
-  { name: 'brave',    path: path.join(LOCALAPPDATA, 'BraveSoftware', 'Brave-Browser', 'User Data') },
-  { name: 'chrome',   path: path.join(LOCALAPPDATA, 'Google', 'Chrome', 'User Data') },
-  { name: 'edge',     path: path.join(LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data') },
-  { name: 'chromium', path: path.join(LOCALAPPDATA, 'Chromium', 'User Data') },
+  { name: 'brave',         path: path.join(LOCALAPPDATA, 'BraveSoftware', 'Brave-Browser', 'User Data') },
+  { name: 'chrome',        path: path.join(LOCALAPPDATA, 'Google', 'Chrome', 'User Data') },
+  { name: 'edge',          path: path.join(LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data') },
+  { name: 'chromium',      path: path.join(LOCALAPPDATA, 'Chromium', 'User Data') },
+  // Profiles custom usados por skills CDP (--user-data-dir=...)
+  { name: 'brave-cdp',     path: path.join(HOME, 'brave-cdp-profile') },
+  { name: 'browser-cdp',   path: path.join(HOME, 'browser-cdp-profile') },
+  { name: 'chrome-debug',  path: path.join(HOME, 'chrome-debug') },
 ];
+
+// Permite agregar profiles via env var: BROWSER_CDP_EXTRA_PROFILES="C:/path1;C:/path2"
+if (process.env.BROWSER_CDP_EXTRA_PROFILES) {
+  for (const extra of process.env.BROWSER_CDP_EXTRA_PROFILES.split(/[;:,]/)) {
+    const trimmed = extra.trim();
+    if (trimmed) USER_DATA_DIRS.push({ name: 'env-extra', path: trimmed });
+  }
+}
 
 function resolveChromeDevtoolsMcpBin() {
   try {
@@ -91,14 +103,64 @@ function readDevToolsActivePort(userDataDir) {
   return null;
 }
 
+function discoverProfilesDynamically() {
+  // Escanea HOME y LOCALAPPDATA buscando dirs con DevToolsActivePort
+  const found = [];
+  const seen = new Set();
+
+  function addIfHasFile(dirPath, name) {
+    if (!dirPath || seen.has(dirPath)) return;
+    seen.add(dirPath);
+    try {
+      if (fs.existsSync(path.join(dirPath, 'DevToolsActivePort'))) {
+        found.push({ name, path: dirPath });
+      }
+    } catch {}
+  }
+
+  // 1. Profiles hardcoded conocidos
+  for (const ud of USER_DATA_DIRS) addIfHasFile(ud.path, ud.name);
+
+  // 2. Escanear HOME por dirs *-profile, *-cdp*, *-debug
+  try {
+    for (const entry of fs.readdirSync(HOME, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (/profile|cdp|debug|chromium/i.test(entry.name)) {
+        addIfHasFile(path.join(HOME, entry.name), `home/${entry.name}`);
+      }
+    }
+  } catch {}
+
+  // 3. Escanear LOCALAPPDATA niveles 1-2 buscando "User Data"
+  try {
+    for (const entry of fs.readdirSync(LOCALAPPDATA, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const sub = path.join(LOCALAPPDATA, entry.name);
+      addIfHasFile(path.join(sub, 'User Data'), `local/${entry.name}/User Data`);
+      try {
+        for (const sub2 of fs.readdirSync(sub, { withFileTypes: true })) {
+          if (!sub2.isDirectory()) continue;
+          addIfHasFile(path.join(sub, sub2.name, 'User Data'), `local/${entry.name}/${sub2.name}/User Data`);
+        }
+      } catch {}
+    }
+  } catch {}
+
+  return found;
+}
+
 async function tryDevToolsActivePort() {
-  for (const ud of USER_DATA_DIRS) {
+  const profiles = discoverProfilesDynamically();
+  log(`Profiles con DevToolsActivePort: ${profiles.length}`);
+  for (const ud of profiles) {
     const port = readDevToolsActivePort(ud.path);
     if (!port) continue;
     const version = await testCdp(`http://127.0.0.1:${port}`, 1500);
     if (version) {
       log(`DevToolsActivePort hit: ${ud.name} -> :${port}`);
       return { port, version };
+    } else {
+      log(`Stale port :${port} en ${ud.name}`);
     }
   }
   return null;
