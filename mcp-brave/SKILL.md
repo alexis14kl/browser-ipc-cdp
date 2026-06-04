@@ -1,159 +1,140 @@
 ---
 name: mcp-brave
 description: Conectar y controlar Brave Browser via IPC + CDP. Usar cuando el usuario pida "abrir brave", "conectar brave", "usar brave", "navegar con brave", "controlar brave", "brave cdp", "brave ipc", o quiera interactuar con su navegador real desde Claude Code.
-version: 1.0.0
+version: 2.0.0
 ---
 
-# MCP Brave - Control de Brave via IPC + CDP
+# MCP Brave — Control de Brave via IPC + CDP
 
-## Modo de Operacion
+Conecta Claude Code al **Brave real del usuario** (con sus bookmarks, sesiones y
+extensiones) por el Chrome DevTools Protocol. El MCP `brave` lee `cdp_info.json`
+en cada llamada, así que el puerto siempre sale de ahí — nunca lo adivines.
 
-**AUTONOMO.** Ejecutar paso a paso sin preguntar.
-
----
-
-## REGLA CRITICA: URL segun entorno
-
-**El MCP de Brave usa diferentes URLs segun donde corra Claude Code:**
-
-| Entorno | URL del MCP |
-|---------|-------------|
-| **WSL** (Claude Code en WSL) | `http://HOST_IP:PUERTO` (ej: `http://172.20.176.1:57108`) |
-| **Windows** (Claude Code nativo) | `http://127.0.0.1:PUERTO` |
-| **Mac/Linux** | `http://127.0.0.1:PUERTO` |
-
-**Si el MCP falla con "Could not connect":**
-1. Leer `cdp_info.json` → verificar el puerto y `WSL_IP`
-2. Si estas en WSL, usar la IP del campo `WSL_IP`, NO `127.0.0.1`
-3. Verificar portproxy: `cmd.exe /c netsh interface portproxy show all`
+**Modo de operación: AUTÓNOMO.** Ejecuta paso a paso sin preguntar.
 
 ---
 
-## PASO 1: Verificar si Brave CDP ya esta activo
+## PASO 0 — Detecta el entorno (decide ANTES de tocar nada)
 
-Leer el archivo `cdp_info.json` para obtener el puerto actual:
-
-```bash
-cat /mnt/c/Users/NyGsoft/Desktop/ipc/cdp_info.json
-```
-
-El archivo contiene `WSL_IP` y `DEBUG_PORT`. Usar para verificar:
+El comando y la URL del CDP cambian según dónde corre Claude Code. Detecta primero
+(distingue los cuatro casos sin ambigüedad — Linux nativo también tiene `/proc/version`):
 
 ```bash
-# Desde WSL: usar WSL_IP del cdp_info.json
-curl -s --connect-timeout 3 http://WSL_IP:PUERTO/json/version
-
-# Desde Windows: usar localhost
-curl -s --connect-timeout 3 http://127.0.0.1:PUERTO/json/version
+if grep -qi microsoft /proc/version 2>/dev/null; then echo WSL
+elif [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then echo MAC
+elif [ "$(uname -s 2>/dev/null)" = "Linux" ]; then echo LINUX
+else echo WINDOWS; fi
 ```
 
-Para obtener la IP de Windows desde WSL:
+(En cmd/PowerShell puro `uname` no existe → cae a `WINDOWS`, correcto.)
+
+| Resultado | Entorno | URL del CDP | Cómo lanzar Brave |
+|-----------|---------|-------------|-------------------|
+| `WSL` | **WSL** — Claude Code en WSL, Brave en el host Windows | `http://<WSL_IP>:<PUERTO>` (campo `WSL_IP` de `cdp_info.json`) | `cmd.exe /c C:\Users\NyGsoft\Desktop\ipc\brave_cdp.bat` |
+| `WINDOWS` | **Windows nativo** | `http://127.0.0.1:<PUERTO>` | `C:\Users\NyGsoft\Desktop\ipc\brave_cdp.bat` |
+| `MAC` | **macOS nativo** | `http://127.0.0.1:<PUERTO>` | `python3 brave_ipc.py` |
+| `LINUX` | **Linux nativo** | `http://127.0.0.1:<PUERTO>` | `python3 brave_ipc.py` |
+
+> Solo **WSL** usa `WSL_IP` + portproxy (Brave vive en Windows). Windows, macOS y Linux
+> nativos usan `127.0.0.1` directo, sin portproxy. `brave_ipc.py` ya conoce las rutas
+> de Brave en los tres SO (Program Files / Brave Browser.app / /usr/bin/brave-browser).
+
+---
+
+## PASO 1 — ¿Ya hay un Brave con CDP activo?
+
+Lee el puerto de `cdp_info.json` y prueba el endpoint:
+
 ```bash
-grep nameserver /etc/resolv.conf
+# El archivo vive en la carpeta del proyecto:
+cat C:\Users\NyGsoft\Desktop\ipc\cdp_info.json    # Windows
+# cat /mnt/c/Users/NyGsoft/Desktop/ipc/cdp_info.json   # WSL
+
+# Verifica (usa la URL de la tabla del PASO 0 con el DEBUG_PORT del json):
+curl -s --connect-timeout 3 http://127.0.0.1:<PUERTO>/json/version
 ```
 
-| Resultado | Accion |
+| Resultado | Acción |
 |-----------|--------|
-| CDP responde | Ir al PASO 3 (ya esta listo) |
-| CDP no responde | Ir al PASO 2 (lanzar Brave) |
-| cdp_info.json no existe | Ir al PASO 2 |
+| Responde JSON con `webSocketDebuggerUrl` | Ya está listo → **PASO 3** |
+| No responde / `cdp_info.json` no existe | → **PASO 2** |
 
 ---
 
-## PASO 2: Lanzar Brave con CDP
+## PASO 2 — Lanzar Brave con CDP (método único canónico)
 
-Indicar a Alexis que ejecute en Windows:
+Ejecuta el launcher. Cierra el Brave previo, abre Brave con puerto de depuración,
+detecta el puerto real, y **reescribe `cdp_info.json` y `.mcp.json`** solo:
 
 ```bat
+:: Windows (pide UAC una vez para el portproxy; acepta)
 C:\Users\NyGsoft\Desktop\ipc\brave_cdp.bat
-```
 
-O desde terminal:
-```bat
+:: o directo, sin el wrapper .bat:
 python C:\Users\NyGsoft\Desktop\ipc\brave_ipc.py
 ```
 
-El script automaticamente:
-1. Cierra Brave existente
-2. Abre Brave con `--remote-debugging-port=0` (puerto dinamico IPC)
-3. Detecta el puerto via `DevToolsActivePort`
-4. Configura `netsh portproxy` para WSL
-5. Actualiza `.mcp.json` con el nuevo puerto
-6. Guarda todo en `cdp_info.json`
-
-**Modos disponibles:**
+Perfiles:
 
 | Comando | Perfil |
 |---------|--------|
-| `python brave_ipc.py` | **REAL** - Tu Brave con bookmarks, passwords, extensiones, sesiones |
-| `python brave_ipc.py --clean` | Limpio - Sesion vacia para testing |
+| `python brave_ipc.py` | **REAL** — tu Brave con bookmarks, sesiones, extensiones |
+| `python brave_ipc.py --clean` | **Limpio** — sesión vacía para pruebas |
 
-Despues de ejecutar, pedir a Alexis que haga `/mcp` en Claude Code para reconectar.
+Tras lanzar, pide al usuario que haga **`/mcp`** en Claude Code para reconectar el
+servidor `brave` (lee el `cdp_info.json` ya actualizado).
 
 ---
 
-## PASO 3: Usar MCP Brave
+## PASO 3 — Usar el MCP Brave
 
-Una vez conectado, las herramientas disponibles son:
+Antes de interactuar, **siempre** toma un snapshot para tener los `uid` frescos.
 
-### Navegacion
-- `mcp__brave__list_pages` — Ver todas las tabs abiertas
-- `mcp__brave__select_page` — Seleccionar una tab por ID
-- `mcp__brave__navigate_page` — Navegar a URL
-- `mcp__brave__new_page` — Abrir nueva tab
-- `mcp__brave__close_page` — Cerrar tab
+### Navegación
+- `mcp__brave__list_pages` — listar tabs
+- `mcp__brave__select_page` — seleccionar tab por id
+- `mcp__brave__navigate_page` — ir a URL / back / forward / reload
+- `mcp__brave__new_page` — abrir tab
+- `mcp__brave__close_page` — cerrar tab
 
-### Interaccion
-- `mcp__brave__take_snapshot` — Leer contenido de la pagina (a11y tree)
-- `mcp__brave__take_screenshot` — Captura de pantalla
-- `mcp__brave__click` — Click en elemento por uid
-- `mcp__brave__fill` — Escribir en campo de texto
-- `mcp__brave__press_key` — Presionar tecla (Enter, Tab, etc.)
-- `mcp__brave__hover` — Hover sobre elemento
-- `mcp__brave__type_text` — Escribir texto caracter por caracter
+### Interacción (requiere `uid` de un snapshot reciente)
+- `mcp__brave__take_snapshot` — leer la página (árbol a11y con uids) ← úsalo primero
+- `mcp__brave__take_screenshot` — captura visual
+- `mcp__brave__click` — click por uid
+- `mcp__brave__fill` / `mcp__brave__fill_form` — escribir en campo(s)
+- `mcp__brave__type_text` — teclear carácter a carácter
+- `mcp__brave__press_key` — Enter, Tab, etc.
+- `mcp__brave__hover` — hover por uid
 
 ### Avanzado
-- `mcp__brave__evaluate_script` — Ejecutar JavaScript en la pagina
-- `mcp__brave__list_network_requests` — Ver requests de red
-- `mcp__brave__get_network_request` — Detalle de un request especifico
-- `mcp__brave__list_console_messages` — Ver consola del navegador
-- `mcp__brave__fill_form` — Llenar formulario completo
-- `mcp__brave__lighthouse_audit` — Auditoria de performance/SEO
+- `mcp__brave__evaluate_script` — ejecutar JS en la página
+- `mcp__brave__list_network_requests` / `get_network_request` — tráfico de red
+- `mcp__brave__list_console_messages` — consola
+- `mcp__brave__lighthouse_audit` — performance / SEO
 
 ---
 
-## Datos Tecnicos
+## Datos técnicos
 
 | Campo | Valor |
 |-------|-------|
 | Brave exe | `C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe` |
 | Perfil real | `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data` |
 | Perfil limpio | `%USERPROFILE%\brave-cdp-profile` |
-| Puerto CDP | Dinamico (asignado por IPC, guardado en cdp_info.json) |
-| Portproxy | `0.0.0.0:PUERTO → 127.0.0.1:PUERTO` (auto-configurado) |
-| IP WSL→Windows | Variable (leer de `/etc/resolv.conf`) |
+| Puerto CDP | En `cdp_info.json` (`DEBUG_PORT`) — léelo, no lo asumas |
+| Estado / WS | `cdp_info.json` → `MODE`, `DEBUG_WS` |
+| MCP server | `brave` → `node brave_mcp_launcher.js` (lee `cdp_info.json` en cada uso) |
 | Scripts | `C:\Users\NyGsoft\Desktop\ipc\` |
-| MCP config | `C:\Users\NyGsoft\.mcp.json` (auto-actualizado) |
-
----
-
-## Ventajas del modo IPC
-
-- **Tu Brave real**: bookmarks, passwords, extensiones, sesiones activas (Jira, WhatsApp, n8n, etc.)
-- **Puerto dinamico**: sin conflictos, el OS asigna puerto libre
-- **Sin IFEO/registry**: no modifica el sistema
-- **Portproxy automatico**: WSL alcanza el puerto sin config manual
-- **.mcp.json auto-actualizado**: Claude Code reconecta con `/mcp`
 
 ---
 
 ## Troubleshooting
 
-| Problema | Solucion |
+| Problema | Solución |
 |----------|----------|
-| MCP "brave" no conecta | Verificar puerto en `.mcp.json` vs `cdp_info.json`. Ejecutar `/mcp` |
-| CDP no responde desde WSL | Verificar portproxy: `netsh interface portproxy show all` |
-| IP de WSL cambio | `grep nameserver /etc/resolv.conf` → actualizar `.mcp.json` |
-| Brave no abre | Verificar ruta del exe. Ejecutar `brave_ipc.py` manualmente |
-| UAC cada vez | Normal. El portproxy necesita Admin. Solo pide una vez por sesion |
-| Puerto cambio | Es dinamico. Ejecutar `brave_ipc.py` actualiza todo automaticamente |
+| MCP `brave` no conecta | Confirma que `cdp_info.json` tiene el puerto donde Brave escucha; luego `/mcp` |
+| `curl /json/version` falla con Brave abierto | Brave reusó un proceso sin `--remote-debugging-port`. Relanza con el PASO 2 |
+| (WSL) CDP no responde | `cmd.exe /c netsh interface portproxy show all`; revisa `WSL_IP` en `cdp_info.json` |
+| (WSL) IP cambió | `grep nameserver /etc/resolv.conf` → vuelve a correr el PASO 2 (reescribe todo) |
+| Puerto en uso | `netstat -ano | findstr :<PUERTO>` y cierra el PID, o relanza (el launcher elige otro) |
+| UAC pide permiso | Normal: el portproxy necesita Admin. Acepta una vez por sesión |

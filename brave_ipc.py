@@ -33,35 +33,109 @@ from pathlib import Path
 CONFIG_FILE = Path(__file__).parent / "browser_config.json"
 IPC_INFO_FILE = Path(__file__).parent / "cdp_info.json"
 
-# Rutas de búsqueda por navegador (fallback si no hay config)
-BROWSER_SEARCH_PATHS = {
-    "brave": [
-        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
-    ],
-    "chrome": [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-    ],
-    "edge": [
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-    ],
-    "chromium": [
-        os.path.expandvars(r"%LOCALAPPDATA%\Chromium\Application\chrome.exe"),
-    ],
-}
+# Rutas de búsqueda por navegador, según sistema operativo.
+# Path(p).exists() filtra las que no aplican, pero separamos por plataforma
+# para no depender de %VARS% de Windows en Mac/Linux (no se expanden ahí).
+_HOME = Path.home()
 
-BROWSER_USER_DATA = {
-    "brave": os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data"),
-    "chrome": os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data"),
-    "edge": os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data"),
-    "chromium": os.path.expandvars(r"%LOCALAPPDATA%\Chromium\User Data"),
-}
+if sys.platform == "win32":
+    BROWSER_SEARCH_PATHS = {
+        "brave": [
+            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+        ],
+        "chrome": [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        ],
+        "edge": [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ],
+        "chromium": [
+            os.path.expandvars(r"%LOCALAPPDATA%\Chromium\Application\chrome.exe"),
+        ],
+    }
+    BROWSER_USER_DATA = {
+        "brave": os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data"),
+        "chrome": os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data"),
+        "edge": os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data"),
+        "chromium": os.path.expandvars(r"%LOCALAPPDATA%\Chromium\User Data"),
+    }
+elif sys.platform == "darwin":
+    BROWSER_SEARCH_PATHS = {
+        "brave": [
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            str(_HOME / "Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+        ],
+        "chrome": [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ],
+        "edge": [
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        ],
+        "chromium": [
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ],
+    }
+    _APP_SUPPORT = _HOME / "Library/Application Support"
+    BROWSER_USER_DATA = {
+        "brave": str(_APP_SUPPORT / "BraveSoftware/Brave-Browser"),
+        "chrome": str(_APP_SUPPORT / "Google/Chrome"),
+        "edge": str(_APP_SUPPORT / "Microsoft Edge"),
+        "chromium": str(_APP_SUPPORT / "Chromium"),
+    }
+else:  # linux y otros unix
+    BROWSER_SEARCH_PATHS = {
+        "brave": [
+            "/usr/bin/brave-browser",
+            "/usr/bin/brave-browser-stable",
+            "/opt/brave.com/brave/brave",
+            "/snap/bin/brave",
+            str(_HOME / ".local/share/flatpak/exports/bin/com.brave.Browser"),
+            "/var/lib/flatpak/exports/bin/com.brave.Browser",
+        ],
+        "chrome": [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/opt/google/chrome/chrome",
+        ],
+        "edge": [
+            "/usr/bin/microsoft-edge",
+            "/opt/microsoft/msedge/msedge",
+        ],
+        "chromium": [
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/snap/bin/chromium",
+        ],
+    }
+    _CONFIG = _HOME / ".config"
+    BROWSER_USER_DATA = {
+        "brave": str(_CONFIG / "BraveSoftware/Brave-Browser"),
+        "chrome": str(_CONFIG / "google-chrome"),
+        "edge": str(_CONFIG / "microsoft-edge"),
+        "chromium": str(_CONFIG / "chromium"),
+    }
 
-CLEAN_USER_DATA = Path(os.path.expandvars(r"%USERPROFILE%\browser-cdp-profile"))
+# Nombres de ejecutable a buscar en el PATH (fallback), por plataforma.
+if sys.platform == "win32":
+    BROWSER_PATH_CMDS = ["brave", "chrome", "msedge", "chromium"]
+elif sys.platform == "darwin":
+    BROWSER_PATH_CMDS = ["brave", "brave-browser", "google-chrome", "chromium"]
+else:
+    BROWSER_PATH_CMDS = [
+        "brave-browser", "brave-browser-stable", "brave",
+        "google-chrome", "google-chrome-stable",
+        "chromium", "chromium-browser", "microsoft-edge",
+    ]
+
+if sys.platform == "win32":
+    CLEAN_USER_DATA = Path(os.path.expandvars(r"%USERPROFILE%\browser-cdp-profile"))
+else:
+    CLEAN_USER_DATA = _HOME / "browser-cdp-profile"
 
 
 # ─── Utilidades ───────────────────────────────────────────────────────────────
@@ -89,11 +163,22 @@ def detect_browsers() -> list[dict]:
             if Path(p).exists():
                 found.append({"name": name, "exe": p, "user_data": BROWSER_USER_DATA.get(name, "")})
                 break
-    # Buscar también en PATH
-    for cmd in ["brave", "chrome", "msedge", "chromium"]:
-        exe = shutil.which(cmd) or shutil.which(f"{cmd}.exe")
+    # Buscar también en PATH (nombres de binario según plataforma)
+    for cmd in BROWSER_PATH_CMDS:
+        exe = shutil.which(cmd) or (shutil.which(f"{cmd}.exe") if sys.platform == "win32" else None)
         if exe and not any(b["exe"] == exe for b in found):
-            found.append({"name": cmd, "exe": exe, "user_data": ""})
+            # Normaliza el nombre lógico para reusar BROWSER_USER_DATA
+            if "brave" in cmd:
+                name = "brave"
+            elif "chrome" in cmd:
+                name = "chrome"
+            elif "edge" in cmd:
+                name = "edge"
+            elif "chromium" in cmd:
+                name = "chromium"
+            else:
+                name = cmd
+            found.append({"name": name, "exe": exe, "user_data": BROWSER_USER_DATA.get(name, "")})
     return found
 
 

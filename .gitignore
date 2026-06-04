@@ -10,3 +10,7 @@ browser_config.json
 
 # Node
 node_modules/
+
+# Python
+__pycache__/
+*.pyc
