@@ -93,6 +93,30 @@ brave_ipc.py lanza Brave
   Claude Code usa mcp__brave__* para controlar el navegador
 ```
 
+### Proxy CDP dinamico (v2.3.0+)
+
+El launcher ya no pasa el puerto del navegador directo a chrome-devtools-mcp.
+Levanta un **proxy local en puerto fijo** (default `9333`) y chrome-devtools-mcp
+apunta siempre ahi:
+
+```
+chrome-devtools-mcp ──> http://127.0.0.1:9333 (proxy, puerto FIJO)
+                              |
+                              v  re-resuelve el puerto real EN CADA conexion
+                        Brave/Chrome en :54xxx (cambia en cada reinicio)
+```
+
+Esto elimina el problema clasico: el puerto se resolvia UNA vez al arrancar el
+MCP, y si el navegador arrancaba despues (o se reiniciaba con `port=0`, que da
+puerto nuevo cada vez) el MCP quedaba apuntando a un puerto muerto hasta
+reiniciarlo. Con el proxy, la siguiente llamada re-resuelve sola: no hay que
+reiniciar el MCP nunca por cambio de puerto, y el cliente (la IA) solo conoce
+UN puerto que no cambia.
+
+- `BROWSER_CDP_PROXY_PORT` cambia el puerto fijo (default 9333; si esta ocupado prueba los siguientes).
+- `BROWSER_CDP_NO_PROXY=1` desactiva el proxy (comportamiento legacy).
+- Diagnostico: `browser-ipc-cdp-mcp --resolve-only` (imprime el puerto resuelto) y `--proxy-only` (solo el proxy, sin MCP).
+
 ---
 
 ## Archivos
@@ -101,7 +125,8 @@ brave_ipc.py lanza Brave
 |---------|---------|
 | `brave_ipc.py` | Launcher principal. Abre Brave con CDP dinamico via IPC |
 | `brave_cdp.bat` | Doble-click para ejecutar brave_ipc.py |
-| `brave_mcp_launcher.js` | Wrapper MCP que lee el puerto dinamico y lanza chrome-devtools-mcp |
+| `brave_mcp_launcher.js` | Wrapper MCP que resuelve el puerto dinamico y lanza chrome-devtools-mcp detras del proxy |
+| `lib/cdp-proxy.js` | Proxy CDP en puerto fijo con re-resolucion on-demand y tunel WebSocket |
 | `cdp_info.json` | Se genera al ejecutar. Contiene puerto, WebSocket, PID, etc. |
 | `README.md` | Este archivo |
 
