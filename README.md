@@ -117,6 +117,18 @@ UN puerto que no cambia.
 - `BROWSER_CDP_NO_PROXY=1` desactiva el proxy (comportamiento legacy).
 - Diagnostico: `browser-ipc-cdp-mcp --resolve-only` (imprime el puerto resuelto) y `--proxy-only` (solo el proxy, sin MCP).
 
+Mejoras v2.3.1:
+
+- **Handshake MCP no bloqueante**: el launcher ya no espera el auto-launch del
+  navegador (hasta 60s) antes de arrancar chrome-devtools-mcp. Si el navegador
+  esta corriendo sin `--remote-debugging-port`, antes el cliente MCP cortaba por
+  timeout (30s en Claude Code); ahora el MCP arranca al instante y el navegador
+  se resuelve/lanza en background, on-demand via el proxy.
+- **Reclamo del puerto fijo**: cada proxy responde con el header
+  `x-cdp-proxy: browser-ipc-cdp`. Si al arrancar el puerto 9333 lo ocupa un
+  proxy huerfano de una sesion anterior, el nuevo lo detecta por ese header, lo
+  mata y toma el puerto — el puerto fijo se mantiene fijo (antes caia a 9334).
+
 ---
 
 ## Archivos

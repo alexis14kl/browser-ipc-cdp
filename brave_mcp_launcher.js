@@ -386,7 +386,7 @@ async function autoLaunch() {
   return await tryDevToolsActivePort();
 }
 
-async function ensureCdp() {
+async function ensureCdp({ launch = true } = {}) {
   let result = await tryDevToolsActivePort();
   if (result) return result;
 
@@ -394,6 +394,7 @@ async function ensureCdp() {
   result = IS_WIN ? await discoverViaNetstat() : await discoverViaPosix();
   if (result) return result;
 
+  if (!launch) return null;
   log('No live CDP found. Auto-launching browser.');
   result = await autoLaunch();
   return result;
@@ -429,14 +430,24 @@ async function main() {
   // Flags de diagnóstico:
   //   --resolve-only  imprime el puerto CDP resuelto y sale
   //   --proxy-only    levanta solo el proxy (sin chrome-devtools-mcp)
-  const cdp = await ensureCdp();
-
   if (process.argv.includes('--resolve-only')) {
+    const cdp = await ensureCdp();
     console.log(JSON.stringify(cdp ? { port: cdp.port, browser: cdp.version.Browser } : null));
     process.exit(cdp ? 0 : 1);
   }
 
+  // Resolución rápida SIN auto-launch: lanzar un navegador tarda más que el
+  // timeout de handshake MCP del cliente (30s en Claude Code), y bloquearía
+  // el arranque. Con el proxy, el backend se re-resuelve (auto-launch
+  // incluido) on-demand en la primera conexión.
+  let cdp = await ensureCdp({ launch: false });
+
   const proxy = await startDynamicProxy(cdp);
+
+  // Sin proxy no hay resolución on-demand: el auto-launch bloqueante es la
+  // única opción (comportamiento legacy con BROWSER_CDP_NO_PROXY=1).
+  if (!proxy && !cdp) cdp = await ensureCdp();
+
   const backendDesc = cdp ? `:${cdp.port}` : 'pendiente (se resuelve on-demand)';
 
   if (process.argv.includes('--proxy-only')) {
@@ -457,6 +468,10 @@ async function main() {
     browserUrl = 'http://127.0.0.1:9222';
     log(`CDP unresolved. MCP will retry against fallback ${browserUrl}.`);
   }
+
+  // Warm-up en background: si no hay backend aún, disparar el auto-launch ya
+  // (sin bloquear el handshake) para que la primera tool call no lo pague.
+  if (proxy && !cdp) ensureCdp().catch(() => {});
 
   const runner = pickRunner();
   const args = [...runner.args, '--browserUrl', browserUrl];
