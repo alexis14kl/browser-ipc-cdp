@@ -20,6 +20,7 @@
 const http = require('http');
 const net = require('net');
 const { execFile } = require('child_process');
+const { createInputTap } = require('./ws-tap');
 
 const PROXY_HOST = '127.0.0.1';
 // Cache negativo: con el navegador caído, no re-escanear (ps/lsof/probes) en cada request.
@@ -78,10 +79,11 @@ async function reclaimPort(port, log) {
  * @param {{port: number, version: object|null}|null} [opts.initialBackend] - Backend ya resuelto (cache inicial).
  * @param {() => Promise<{port: number, version: object|null}|null>} opts.resolveBackend - Re-resuelve el backend. Debe devolverlo YA verificado (vivo) o null.
  * @param {(backend: {port: number, version: object|null}, proxyPort: number) => void} [opts.onBackendChange] - Se dispara en cada resolución exitosa (incluido el backend inicial).
+ * @param {(evt: {type: string, x: number, y: number, button?: string}) => void} [opts.onClientInput] - Se dispara por cada Input.dispatchMouseEvent que el cliente (chrome-devtools-mcp) manda por el túnel. SOLO-OBSERVACIÓN.
  * @param {(msg: string) => void} opts.log
  * @returns {Promise<{port: number, server: import('http').Server}>}
  */
-async function startProxy({ preferredPort, initialBackend = null, resolveBackend, onBackendChange, log, maxPortAttempts = 10 }) {
+async function startProxy({ preferredPort, initialBackend = null, resolveBackend, onBackendChange, onClientInput, log, maxPortAttempts = 10 }) {
   let listenPort = null;
   let backend = initialBackend;
   let resolving = null;
@@ -183,6 +185,14 @@ async function startProxy({ preferredPort, initialBackend = null, resolveBackend
         }
         backend.write(lines.join('\r\n') + '\r\n\r\n');
         if (head && head.length) backend.write(head);
+        // Tap SOLO-OBSERVACIÓN del stream cliente→backend: un segundo listener
+        // 'data' ve una copia de los chunks sin interferir con el pipe (que
+        // sigue moviendo los bytes tal cual). Extrae los Input.dispatchMouseEvent
+        // de la IA para el overlay. Nunca escribe de vuelta al túnel.
+        if (onClientInput) {
+          const tap = createInputTap(onClientInput);
+          socket.on('data', (c) => { try { tap(c); } catch {} });
+        }
         socket.pipe(backend);
         backend.pipe(socket);
         backend.on('close', () => socket.destroy());

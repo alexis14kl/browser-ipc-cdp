@@ -25,6 +25,7 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
   const injectedSessions = new Set();
   let stopped = false;
   let retryTimer = null;
+  let lastMoveAt = 0;
 
   function send(method, params = {}, sessionId) {
     const id = nextId++;
@@ -130,6 +131,27 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
     }
   }
 
+  // Dibuja un click de la IA en todas las páginas inyectadas. Lo alimenta el
+  // tap del proxy (Input.dispatchMouseEvent) — es la señal exclusiva de la IA.
+  // Fire-and-forget; los mouseMoved se estrangulan para no inundar el WS.
+  function showAiInput(evt) {
+    if (!ws || !evt || injectedSessions.size === 0) return;
+    const type = evt.type;
+    if (type === 'mouseMoved') {
+      const now = Date.now();
+      if (now - lastMoveAt < 30) return;
+      lastMoveAt = now;
+    } else if (type !== 'mousePressed' && type !== 'mouseReleased') {
+      return;
+    }
+    const x = Math.round(evt.x || 0);
+    const y = Math.round(evt.y || 0);
+    const expr = `window.__clAiPointer&&window.__clAiPointer(${JSON.stringify(type)},${x},${y})`;
+    for (const sessionId of injectedSessions) {
+      send('Runtime.evaluate', { expression: expr, includeCommandLineAPI: false }, sessionId).catch(() => {});
+    }
+  }
+
   // Arranca el overlay: no bloquea (best-effort). Se auto-mantiene vía retries.
   function start() {
     stopped = false;
@@ -144,7 +166,7 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
   }
 
   // `run` se conserva como alias de un intento único (lo usa el demo).
-  return { start, run: connect, close };
+  return { start, run: connect, close, showAiInput };
 }
 
 module.exports = { createCursorOverlay };

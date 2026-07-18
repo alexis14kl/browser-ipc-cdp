@@ -44,6 +44,10 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverl
         initialBackend: initial,
         resolveBackend: () => cdp.resolve(), // devuelve {port, version} ya verificado
         onBackendChange: (backend, proxyPort) => cdpInfo.write(backend.port, backend.version, 'PROXY', proxyPort),
+        // Los clicks de la IA (Input.dispatchMouseEvent) viajan por el túnel;
+        // el proxy los espía (solo-observación) y el overlay los dibuja. El
+        // mouse físico del usuario no pasa por aquí → overlay exclusivo de la IA.
+        onClientInput: cursorOverlay ? (evt) => { try { cursorOverlay.showAiInput(evt); } catch {} } : undefined,
         log,
       });
     } catch (e) {
