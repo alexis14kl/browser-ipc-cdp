@@ -227,12 +227,16 @@ async function startProxy({ preferredPort, initialBackend = null, resolveBackend
           reject(e);
         }
       });
-      server.listen(p, PROXY_HOST, () => {
-        server.removeAllListeners('error');
-        server.on('error', (e) => log(`proxy server error: ${e.message}`));
-        resolve(p);
-      });
+      server.listen(p, PROXY_HOST);
     };
+    // UN solo listener de 'listening' y el puerto real desde server.address():
+    // pasar callback a cada listen() deja callbacks stale de intentos fallidos
+    // que resolvían con el puerto viejo (ocupado) en vez del que quedó activo.
+    server.on('listening', () => {
+      server.removeAllListeners('error');
+      server.on('error', (e) => log(`proxy server error: ${e.message}`));
+      resolve(server.address().port);
+    });
     tryPort(preferredPort);
   });
 

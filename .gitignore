@@ -1,16 +1,14 @@
+
 # Archivos dinámicos (se generan al ejecutar)
-cdp_info.json
-browser_config.json
-
 # MCP config (contiene IPs locales)
-.mcp.json
-
-# Notas personales
-*.txt
-
 # Node
-node_modules/
-
+# Notas personales
 # Python
-__pycache__/
 *.pyc
+*.txt
+.DS_Store
+.mcp.json
+__pycache__/
+browser_config.json
+cdp_info.json
+node_modules/

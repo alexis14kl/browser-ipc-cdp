@@ -1,7 +1,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { log, success, warn } = require('./logger');
+const { log, success, warn } = require('../views/logger');
 
 function getWslHostIp() {
   const IS_WIN = process.platform === 'win32';
@@ -97,7 +97,7 @@ function updateMcpJson(port, wslIp) {
   // Estrategia: apuntar al wrapper Node dinamico.
   // El wrapper lee cdp_info.json en cada invocacion -> puerto siempre fresco.
   // No hay que reescribir .mcp.json cuando cambia el puerto dinamico.
-  const wrapperPath = path.join(__dirname, '..', 'brave_mcp_launcher.js');
+  const wrapperPath = path.join(__dirname, '..', '..', 'brave_mcp_launcher.js');
   const braveEntry = {
     command: 'node',
     args: [wrapperPath],
@@ -106,7 +106,7 @@ function updateMcpJson(port, wslIp) {
   // Rutas base donde buscar .mcp.json
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const cwd = process.cwd();
-  const scriptDir = path.join(__dirname, '..');
+  const scriptDir = path.join(__dirname, '..', '..');
 
   // 1. Rutas fijas conocidas
   const mcpPaths = new Set([
