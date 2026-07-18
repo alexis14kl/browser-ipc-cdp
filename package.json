@@ -43,5 +43,8 @@
     "brave_cdp.bat",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"test-claude/*.test.js\""
+  }
 }
