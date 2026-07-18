@@ -29,6 +29,8 @@ const { createLogger } = require('./src/views/logger');
 const { createCdpInfoView } = require('./src/views/cdp-info-view');
 const { createCdpService } = require('./src/services/cdp-service');
 const { createAutoLaunch } = require('./src/services/auto-launch');
+const { createCursorOverlay } = require('./src/services/cursor-overlay');
+const { OVERLAY_SOURCE } = require('./src/views/overlay-script');
 const { createMcpController } = require('./src/controllers/mcp-controller');
 
 // MCP stdio: stdout es EXCLUSIVO del JSON-RPC; todo log va a stderr.
@@ -45,12 +47,18 @@ const cdp = createCdpService({
   }),
 });
 
+// Overlay del cursor: opt-in con BROWSER_CDP_CURSOR=1 (apagado por defecto).
+const cursorOverlay = process.env.BROWSER_CDP_CURSOR === '1'
+  ? createCursorOverlay({ resolve: () => cdp.resolve(), log, source: OVERLAY_SOURCE })
+  : null;
+
 const controller = createMcpController({
   cdp,
   startProxy,
   cdpInfo: createCdpInfoView({ file: path.join(__dirname, 'cdp_info.json'), log }),
   log,
   isWin: platformId === 'win32',
+  cursorOverlay,
 });
 
 controller.run().catch((e) => { log(`fatal: ${e.message}`); process.exit(1); });

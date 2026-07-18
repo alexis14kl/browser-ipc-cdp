@@ -11,7 +11,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, env = process.env, argv = process.argv }) {
+function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverlay = null, env = process.env, argv = process.argv }) {
   function resolveChromeDevtoolsMcpBin() {
     try {
       return require.resolve('chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js');
@@ -98,6 +98,11 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, env = proce
     // Warm-up en background: si no hay backend aún, disparar el auto-launch ya
     // (sin bloquear el handshake) para que la primera tool call no lo pague.
     if (proxy && !resolved) cdp.resolve().catch(() => {});
+
+    // Overlay del cursor (opt-in con BROWSER_CDP_CURSOR=1): comparte el ciclo
+    // de vida del MCP y se auto-reconecta si Brave cambia de puerto. No
+    // bloquea el arranque (best-effort).
+    if (cursorOverlay) { try { cursorOverlay.start(); } catch {} }
 
     const runner = pickRunner();
     const args = [...runner.args, '--browserUrl', browserUrl];
