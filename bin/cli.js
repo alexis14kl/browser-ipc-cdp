@@ -1,22 +1,17 @@
 #!/usr/bin/env node
 /**
- * browser-ipc-cdp CLI
- *
- * Un comando para conectar Claude Code a tu navegador real via IPC + CDP.
+ * browser-ipc-cdp CLI — instalador que conecta Claude Code a tu navegador
+ * real via IPC + CDP. Entrada delgada: parsea flags y delega en CliController.
  *
  * Uso:
  *   npx browser-ipc-cdp                  # Auto-detectar navegador + instalar
  *   npx browser-ipc-cdp --browser brave  # Forzar Brave
- *   npx browser-ipc-cdp --browser chrome # Forzar Chrome
  *   npx browser-ipc-cdp --list           # Listar navegadores
  *   npx browser-ipc-cdp --status         # Ver estado actual
  *   npx browser-ipc-cdp --uninstall      # Desinstalar
  */
-const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP, IS_WSL, IS_WIN, IS_MAC } = require('../lib/browser');
-const { setupPortproxy, setupFirewall } = require('../lib/network');
-const { updateMcpJson, getWslHostIp } = require('../lib/mcp');
-const { saveCdpInfo, loadCdpInfo } = require('../lib/config');
-const { log, success, warn, error, banner, table } = require('../lib/logger');
+const { createLogger } = require('../src/views/logger');
+const { createCliController } = require('../src/controllers/cli-controller');
 
 const args = process.argv.slice(2);
 const flags = {};
@@ -28,178 +23,11 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
-async function main() {
-  banner();
-  const platform = IS_WIN ? 'Windows' : IS_WSL ? 'WSL (Windows host)' : IS_MAC ? 'macOS' : 'Linux';
-  log(`Plataforma: ${platform}`);
+// El CLI no habla protocolo por stdout: sus mensajes van a stdout (prefijo "  ").
+const logger = createLogger({ stream: process.stdout, prefix: '  ' });
+const controller = createCliController({ logger });
 
-  // --list: listar navegadores
-  if (flags.list) {
-    const browsers = detectBrowsers();
-    if (browsers.length === 0) {
-      error('No se encontraron navegadores Chromium instalados.');
-      process.exit(1);
-    }
-    log('Navegadores Chromium detectados:');
-    browsers.forEach(b => log(`  - ${b.name.padEnd(10)} → ${b.exe}`));
-    process.exit(0);
-  }
-
-  // --status: ver estado actual
-  if (flags.status) {
-    const info = loadCdpInfo();
-    if (info) {
-      log(`Puerto CDP: ${info.DEBUG_PORT}`);
-      log(`Navegador:  ${info.BROWSER}`);
-      log(`Modo:       ${info.MODE || 'LAUNCHED'}`);
-      log(`Paginas:    ${info.PAGES}`);
-    } else {
-      warn('No hay sesion CDP activa. Ejecuta: npx browser-ipc-cdp');
-    }
-    process.exit(0);
-  }
-
-  // --uninstall: limpiar
-  if (flags.uninstall) {
-    log('Limpiando configuracion...');
-    // TODO: remove portproxy, firewall rule, .mcp.json entry
-    success('Desinstalado.');
-    process.exit(0);
-  }
-
-  // ─── FLUJO PRINCIPAL ──────────────────────────────────────────────────
-
-  const preferredBrowser = flags.browser || '';
-  const forcePort = parseInt(flags.port) || 0;
-  const clean = !!flags.clean;
-
-  // 1. Detectar navegador
-  log('[1/6] Detectando navegador...');
-  const browser = findBrowser(preferredBrowser);
-  if (!browser) {
-    const available = detectBrowsers();
-    if (available.length > 0) {
-      error(`Navegador '${preferredBrowser}' no encontrado.`);
-      log('Disponibles:');
-      available.forEach(b => log(`  - ${b.name}`));
-    } else {
-      error('No se encontro ningun navegador Chromium.');
-      log('Instala Brave, Chrome o Edge.');
-    }
-    process.exit(1);
-  }
-  success(`${browser.name} encontrado: ${browser.exe}`);
-
-  // 2. Verificar CDP existente
-  log('[2/6] Verificando CDP existente...');
-  const existingPort = await detectExistingCDP(browser);
-
-  let port, mode, pid;
-
-  if (existingPort) {
-    success(`CDP ya activo en puerto ${existingPort}. Sin reiniciar!`);
-    port = existingPort;
-    mode = 'ATTACHED';
-    pid = 0;
-  } else {
-    // 3. Lanzar navegador con CDP
-    log('[3/6] Lanzando navegador con CDP...');
-    const result = await launchBrowser(browser, { port: forcePort, clean });
-    port = result.port;
-    mode = 'LAUNCHED';
-    pid = result.pid;
-    success(`CDP activo en puerto ${port}`);
-  }
-
-  // 4. Firewall
-  log('[4/6] Configurando firewall...');
-  setupFirewall();
-
-  // 5. Portproxy
-  log('[5/6] Configurando portproxy para WSL...');
-  setupPortproxy(port);
-
-  // 6. MCP config
-  log('[6/6] Configurando MCP para Claude Code...');
-  const wslIp = getWslHostIp();
-  updateMcpJson(port, wslIp);
-
-  // Obtener info del CDP
-  let browserVersion = 'Unknown';
-  let wsUrl = '';
-  let pages = 0;
-  try {
-    const http = require('http');
-    const versionData = await fetchJson(`http://127.0.0.1:${port}/json/version`);
-    browserVersion = versionData.Browser || 'Unknown';
-    wsUrl = versionData.webSocketDebuggerUrl || '';
-    const pageList = await fetchJson(`http://127.0.0.1:${port}/json/list`);
-    pages = Array.isArray(pageList) ? pageList.length : 0;
-  } catch (e) {}
-
-  // Guardar info
-  saveCdpInfo({
-    DEBUG_PORT: port,
-    DEBUG_WS: wsUrl,
-    BROWSER: browserVersion,
-    BROWSER_EXE: browser.exe,
-    PID: pid,
-    CDP_URL: `http://127.0.0.1:${port}`,
-    PAGES: pages,
-    MODE: mode,
-    WSL_IP: wslIp,
-  });
-
-  // Resumen
-  console.log('');
-  // URL correcta segun entorno
-  const cdpLocalUrl = `http://127.0.0.1:${port}`;
-  const cdpWslUrl = `http://${wslIp}:${port}`;
-  const cdpUrl = (IS_WSL || wslIp !== '127.0.0.1') ? cdpWslUrl : cdpLocalUrl;
-
-  console.log('='.repeat(55));
-  console.log(`  MODO:        ${mode}${mode === 'ATTACHED' ? ' (sin reiniciar)' : ' (nuevo proceso)'}`);
-  console.log(`  Plataforma:  ${platform}`);
-  console.log(`  Navegador:   ${browserVersion}`);
-  console.log(`  Puerto CDP:  ${port} (dinamico via IPC)`);
-  console.log(`  Paginas:     ${pages}`);
-  console.log('='.repeat(55));
-  console.log('');
-  console.log('  URLs de conexion:');
-  console.log(`    Desde Windows: ${cdpLocalUrl}`);
-  if (wslIp !== '127.0.0.1') {
-    console.log(`    Desde WSL:     ${cdpWslUrl}`);
-  }
-  console.log('');
-  console.log('  MCP configurado en .mcp.json:');
-  console.log(`    browserUrl: ${cdpUrl}`);
-  console.log('');
-  console.log('  Siguiente paso en Claude Code:');
-  console.log('    /mcp   (para conectar el MCP brave)');
-  console.log('');
-  console.log('  Herramientas disponibles:');
-  console.log('    mcp__brave__list_pages');
-  console.log('    mcp__brave__navigate_page');
-  console.log('    mcp__brave__take_snapshot');
-  console.log('    mcp__brave__click / fill / press_key');
-  console.log('');
-}
-
-function fetchJson(url) {
-  return new Promise((resolve, reject) => {
-    const http = require('http');
-    http.get(url, { timeout: 5000 }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(e); }
-      });
-    }).on('error', reject);
-  });
-}
-
-main().catch(e => {
-  error(e.message);
+controller.run(flags).catch((e) => {
+  logger.error(e.message);
   process.exit(1);
 });
