@@ -257,7 +257,8 @@ if (require.main === module) {
     resolveBackend: async () => ({ port: backendPort, version: null }),
     log: (m) => console.error(`[cdp-proxy] ${m}`),
   }).then(({ port }) => {
-    console.error(`[cdp-proxy] escuchando en http://${PROXY_HOST}:${port} -> backend :${backendPort}`);
+    console.error(`[cdp-proxy] MODO DEBUG: escuchando en http://${PROXY_HOST}:${port} -> backend FIJO :${backendPort}`);
+    console.error('[cdp-proxy] no re-resuelve si el navegador cambia de puerto; para un puente real: browser-ipc-cdp-mcp --proxy-only');
   }).catch((e) => {
     console.error(`[cdp-proxy] fatal: ${e.message}`);
     process.exit(1);
