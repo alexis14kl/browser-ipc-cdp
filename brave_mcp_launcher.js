@@ -18,6 +18,7 @@
  *   BROWSER_CDP_PROXY_PORT     puerto fijo del proxy (default 9333)
  *   BROWSER_CDP_NO_PROXY=1     desactiva el proxy (comportamiento legacy)
  *   BROWSER_CDP_EXTRA_PROFILES User Data dirs extra separados por ; : ,
+ *   BROWSER_CDP_CURSOR=0       apaga el overlay del cursor (ON por defecto)
  *
  * Flags de diagnóstico: --resolve-only | --proxy-only
  */
@@ -47,8 +48,10 @@ const cdp = createCdpService({
   }),
 });
 
-// Overlay del cursor: opt-in con BROWSER_CDP_CURSOR=1 (apagado por defecto).
-const cursorOverlay = process.env.BROWSER_CDP_CURSOR === '1'
+// Overlay del cursor: ENCENDIDO por defecto (opt-out con BROWSER_CDP_CURSOR=0).
+// Así basta con tener la versión instalada — no hay que poner un flag en cada
+// config/proyecto. Best-effort y no bloqueante; quien no lo quiera lo apaga.
+const cursorOverlay = process.env.BROWSER_CDP_CURSOR !== '0'
   ? createCursorOverlay({ resolve: () => cdp.resolve(), log, source: OVERLAY_SOURCE })
   : null;
 

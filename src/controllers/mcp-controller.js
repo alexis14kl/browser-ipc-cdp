@@ -99,9 +99,9 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverl
     // (sin bloquear el handshake) para que la primera tool call no lo pague.
     if (proxy && !resolved) cdp.resolve().catch(() => {});
 
-    // Overlay del cursor (opt-in con BROWSER_CDP_CURSOR=1): comparte el ciclo
-    // de vida del MCP y se auto-reconecta si Brave cambia de puerto. No
-    // bloquea el arranque (best-effort).
+    // Overlay del cursor (ON por defecto, opt-out con BROWSER_CDP_CURSOR=0):
+    // comparte el ciclo de vida del MCP y se auto-reconecta si Brave cambia de
+    // puerto. No bloquea el arranque (best-effort).
     if (cursorOverlay) { try { cursorOverlay.start(); } catch {} }
 
     const runner = pickRunner();
