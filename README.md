@@ -115,6 +115,8 @@ UN puerto que no cambia.
 
 - `BROWSER_CDP_PROXY_PORT` cambia el puerto fijo (default 9333; si esta ocupado prueba los siguientes).
 - `BROWSER_CDP_NO_PROXY=1` desactiva el proxy (comportamiento legacy).
+- `BROWSER_CDP_EXTRA_PROFILES` User Data dirs extra donde buscar `DevToolsActivePort` (separados por `;` `:` `,`).
+- `BROWSER_CDP_CURSOR=0` apaga el overlay del cursor (encendido por defecto desde v3.0.1).
 - Diagnostico: `browser-ipc-cdp-mcp --resolve-only` (imprime el puerto resuelto) y `--proxy-only` (solo el proxy, sin MCP).
 
 Mejoras v2.3.1:
@@ -129,6 +131,17 @@ Mejoras v2.3.1:
   proxy huerfano de una sesion anterior, el nuevo lo detecta por ese header, lo
   mata y toma el puerto — el puerto fijo se mantiene fijo (antes caia a 9334).
 
+Mejoras v3.0.x:
+
+- **Arquitectura MVC** (`src/`): `platform/` (Strategy por OS: win/darwin/linux/wsl),
+  `services/` (cdp-service, cdp-proxy, auto-launch, browser-detect, cursor-overlay),
+  `controllers/` (cli, mcp) y `views/` (logger, cdp-info). Una sola implementacion
+  de cada cosa; el CLI y el MCP consumen los mismos servicios.
+  Ver [docs/ARQUITECTURA-MVC.md](docs/ARQUITECTURA-MVC.md).
+- **Cursor overlay (v3.0.1)**: el MCP inyecta un cursor visual en todas las
+  paginas para ver donde hace click la IA. ENCENDIDO por defecto; se apaga con
+  `BROWSER_CDP_CURSOR=0`. Best-effort: si falla, el MCP sigue igual.
+
 ---
 
 ## Archivos
@@ -139,6 +152,7 @@ Mejoras v2.3.1:
 | `brave_cdp.bat` | Doble-click para ejecutar brave_ipc.py |
 | `brave_mcp_launcher.js` | Wrapper MCP que resuelve el puerto dinamico y lanza chrome-devtools-mcp detras del proxy |
 | `src/services/cdp-proxy.js` | Proxy CDP en puerto fijo con re-resolucion on-demand y tunel WebSocket |
+| `src/services/cursor-overlay.js` | Inyecta el cursor visual de la IA en cada pagina (v3.0.1, ON por defecto) |
 | `cdp_info.json` | Se genera al ejecutar. Contiene puerto, WebSocket, PID, etc. |
 | `README.md` | Este archivo |
 
@@ -187,24 +201,23 @@ http://127.0.0.1:{PUERTO}/json/list      → Pestanas abiertas
 
 ### 3. Conectar desde Claude Code
 
-El MCP "brave" esta configurado en `C:\Users\NyGsoft\.mcp.json`:
+El instalador (`npx browser-ipc-cdp`) configura el MCP "brave" automaticamente.
+Tambien puedes hacerlo a mano en `.mcp.json`:
 ```json
 {
   "mcpServers": {
     "brave": {
       "command": "npx",
-      "args": ["-y", "chrome-devtools-mcp@latest", "--browserUrl", "http://172.20.176.1:PUERTO"]
+      "args": ["-y", "browser-ipc-cdp-mcp"]
     }
   }
 }
 ```
 
-> **IMPORTANTE:** El puerto cambia cada vez que ejecutas `brave_ipc.py`.
-> Despues de ejecutar, actualiza el puerto en `.mcp.json` con el valor de `cdp_info.json`.
-> Luego ejecuta `/mcp` en Claude Code para reconectar.
->
-> **Tip:** La IP de WSL puede cambiar entre reinicios.
-> Verificar con: `grep nameserver /etc/resolv.conf`
+> El wrapper resuelve el puerto dinamico solo (via el proxy fijo `:9333`):
+> **no hay que actualizar `.mcp.json` cuando cambia el puerto del navegador.**
+> Si el navegador no esta abierto, el MCP arranca igual y lo lanza on-demand
+> en la primera tool call.
 
 ### 4. Usar desde Claude Code
 
@@ -300,7 +313,7 @@ grep nameserver /etc/resolv.conf
 |----------|----------|
 | `brave_ipc.py` no encuentra Brave | Verificar ruta: `C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe` |
 | Puerto no detectado | Brave tarda en escribir DevToolsActivePort. Esperar 10s y reintentar |
-| MCP "brave" no conecta | Verificar que el puerto en `.mcp.json` coincide con `cdp_info.json` |
+| MCP "brave" no conecta | Verificar el proxy: `curl http://127.0.0.1:9333/json/version`. Si responde 502, el navegador no tiene CDP activo: relanzar con `brave_ipc.py` o dejar que el auto-launch lo abra |
 | WSL no llega al puerto | Agregar portproxy + firewall (ver seccion anterior) |
 | IP de Windows cambio | `grep nameserver /etc/resolv.conf` → actualizar `.mcp.json` |
 | Brave ya estaba abierto | Usar `--no-kill` o cerrar Brave antes de ejecutar |
@@ -311,17 +324,21 @@ grep nameserver /etc/resolv.conf
 
 ```json
 {
-  "DEBUG_PORT": 59152,
-  "DEBUG_WS": "ws://127.0.0.1:59152/devtools/browser/...",
-  "BROWSER": "Chrome/146.0.7680.80",
-  "PID": 25552,
-  "USER_DATA": "C:\\Users\\NyGsoft\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data",
-  "CDP_URL": "http://127.0.0.1:59152",
-  "PAGES": 23
+  "DEBUG_PORT": 55610,
+  "DEBUG_WS": "ws://127.0.0.1:55610/devtools/browser/...",
+  "BROWSER": "Chrome/150.0.7871.128",
+  "CDP_URL": "http://127.0.0.1:9333",
+  "BACKEND_URL": "http://127.0.0.1:55610",
+  "MODE": "PROXY",
+  "UPDATED_AT": "2026-07-18T20:41:41.714Z"
 }
 ```
 
-Otros scripts pueden leer este archivo para saber el puerto actual.
+Otros scripts deben usar `CDP_URL`: con `MODE: "PROXY"` apunta al proxy fijo,
+que sigue valido aunque el navegador se reinicie. `BACKEND_URL` es el puerto
+real del navegador y cambia en cada arranque. Nota: `brave_ipc.py` y cada
+instancia del MCP escriben este archivo; con varias sesiones concurrentes el
+contenido refleja la ultima que escribio.
 
 ---
 
@@ -344,20 +361,19 @@ Todo sin necesidad de login adicional — usa tus sesiones activas.
 ## Flujo completo paso a paso
 
 ```
-1. Cerrar Brave (si esta abierto)
+1. Instalar (una sola vez):
+   npx browser-ipc-cdp          # detecta el navegador y configura el MCP "brave"
 
-2. Ejecutar:
-   python C:\Users\NyGsoft\Desktop\ipc\brave_ipc.py
+2. En Claude Code: /mcp → brave conectado
 
-3. Brave abre con todas tus cosas + CDP activo
-   Output: "Puerto CDP: 59152" (o el que sea)
+3. Listo! Claude Code controla tu navegador real.
+   Si no estaba abierto, la primera tool call lo lanza sola (auto-launch
+   via brave_ipc.py) y el proxy :9333 re-resuelve el puerto en cada conexion.
 
-4. Agregar portproxy (solo la primera vez por puerto):
-   netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=59152 connectaddress=127.0.0.1 connectport=59152
-
-5. Actualizar .mcp.json con el puerto nuevo
-
-6. En Claude Code: /mcp → Reconnected to brave
-
-7. Listo! Claude Code controla tu Brave real
+Opcional (manual):
+   python brave_ipc.py          # abrir el navegador con CDP dinamico a mano
+   python brave_ipc.py --clean  # perfil limpio para testing
 ```
+
+> En WSL ademas hace falta el portproxy + firewall de la seccion
+> "Conexion desde WSL" (el instalador los configura solo).

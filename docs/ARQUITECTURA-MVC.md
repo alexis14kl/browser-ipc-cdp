@@ -132,3 +132,21 @@ test-claude/                          ← node:test, sin dependencias nuevas
 | 3 | `models/` + `views/` + `controllers/`; bins quedan delgados | bajo |
 | 4 | CI + `npm publish` v3.0.0 | nulo |
 | 5 (opcional) | Portar brave_ipc.py a JS (`services/launch/`) | futuro |
+
+## 6. Estado final (as-built, v3.0.1)
+
+El refactor se completó, con algunas consolidaciones respecto al diseño de
+arriba (que se conserva como registro del plan):
+
+| Diseñado | Cómo quedó |
+|---|---|
+| `models/browser-registry.js` + `models/cdp-endpoint.js` | Consolidado en `services/browser-detect.js` (registry + detección + launch/kill); no hubo carpeta `models/` |
+| `services/runner-factory.js` | Inline en `mcp-controller.js` (`pickRunner`) |
+| `views/console-view.js` | Absorbido por `views/logger.js` + `views/cli-cdp-info.js` |
+| `index.js` (Facade) | No se creó: los dos bins (`bin/cli.js`, `brave_mcp_launcher.js`) son la API pública |
+| Fase 5 (portar `brave_ipc.py` a JS) | Pendiente: `brave_ipc.py` sigue siendo el auto-launch (envuelto por `services/auto-launch.js`) |
+
+Agregado fuera del diseño original: `services/cursor-overlay.js` +
+`views/overlay-script.js` — overlay visual del cursor inyectado vía CDP en
+todas las páginas (v3.0.0 opt-in, v3.0.1 ON por defecto con opt-out
+`BROWSER_CDP_CURSOR=0`).
