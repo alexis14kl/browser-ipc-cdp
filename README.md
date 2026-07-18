@@ -208,12 +208,15 @@ Tambien puedes hacerlo a mano en `.mcp.json`:
   "mcpServers": {
     "brave": {
       "command": "npx",
-      "args": ["-y", "browser-ipc-cdp-mcp"]
+      "args": ["-y", "-p", "browser-ipc-cdp", "browser-ipc-cdp-mcp"]
     }
   }
 }
 ```
 
+> El `-p browser-ipc-cdp` es obligatorio si el paquete no esta instalado
+> (global o local): `browser-ipc-cdp-mcp` es el nombre del bin, no del paquete.
+>
 > El wrapper resuelve el puerto dinamico solo (via el proxy fijo `:9333`):
 > **no hay que actualizar `.mcp.json` cuando cambia el puerto del navegador.**
 > Si el navegador no esta abierto, el MCP arranca igual y lo lanza on-demand
