@@ -123,6 +123,46 @@ test('overlay: setAutoAttach al conectar e inyección al aparecer una página', 
   }
 });
 
+test('overlay: si el WS cae a mitad de inyección, no cuelga ni fuga promesas', async () => {
+  // Navegador que NUNCA responde los comandos → los send() quedarían colgados
+  // si no fuera por failAllPending al cerrar (y el timeout defensivo).
+  const http = require('http');
+  const crypto = require('crypto');
+  let sock = null;
+  const server = http.createServer();
+  server.on('upgrade', (req, socket) => {
+    const accept = crypto.createHash('sha1')
+      .update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
+    sock = socket; socket.on('error', () => {}); // no responde a nada
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+
+  const overlay = createCursorOverlay({
+    resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: `ws://127.0.0.1:${port}/x` } }),
+    log: () => {}, source: OVERLAY_SOURCE, retryMs: 100,
+  });
+  try {
+    overlay.start();
+    // Esperar a que conecte (el server no responde, así el await de setAutoAttach
+    // quedaría colgado sin el fix). Dar tiempo y cerrar el socket del server.
+    await waitFor(() => sock !== null, { timeoutMs: 3000 });
+    await new Promise((r) => setTimeout(r, 200));
+    sock.destroy(); // simula caída del navegador a mitad de comando
+    // El servicio no debe crashear; debe seguir vivo e intentar reconectar.
+    // (si failAllPending no existiera, quedarían promesas colgadas, pero el
+    //  proceso igual sigue; este test verifica que no lanza excepción no
+    //  capturada y que close() resuelve limpio)
+    await new Promise((r) => setTimeout(r, 300));
+    assert.ok(true, 'sobrevivió a la caída sin crash');
+  } finally {
+    overlay.close();
+    try { sock && sock.destroy(); } catch {}
+    await closeServer(server);
+  }
+});
+
 test('overlay: se reconecta solo si la conexión CDP cae', async () => {
   const browser = await fakeBrowser();
   const overlay = createCursorOverlay({

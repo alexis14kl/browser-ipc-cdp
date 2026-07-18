@@ -31,7 +31,25 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
     const msg = { id, method, params };
     if (sessionId) msg.sessionId = sessionId;
     ws.send(JSON.stringify(msg));
-    return new Promise((res) => pending.set(id, res));
+    // Timeout defensivo: si el navegador no responde (o se cae justo aquí),
+    // la promesa se rechaza en vez de colgarse para siempre. injectInto lo
+    // captura y limpia. Evita fugas en el Map pending de un proceso largo.
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (pending.delete(id)) reject(new Error(`CDP timeout: ${method}`));
+      }, 8000);
+      pending.set(id, { resolve, reject, timer });
+    });
+  }
+
+  // Rechaza todas las promesas pendientes (WS caído): sin esto, los await de
+  // injectInto quedan colgados y el Map crece en cada reconexión.
+  function failAllPending(reason) {
+    for (const [id, p] of pending) {
+      clearTimeout(p.timer);
+      pending.delete(id);
+      p.reject(new Error(reason));
+    }
   }
 
   async function injectInto(sessionId) {
@@ -53,8 +71,10 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     if (msg.id && pending.has(msg.id)) {
-      pending.get(msg.id)(msg.result);
+      const p = pending.get(msg.id);
+      clearTimeout(p.timer);
       pending.delete(msg.id);
+      p.resolve(msg.result);
       return;
     }
     // Sesión adjuntada a un target page → inyectar
@@ -96,6 +116,7 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
     ws.addEventListener('message', (ev) => onMessage(ev.data));
     ws.addEventListener('close', () => {
       injectedSessions.clear();
+      failAllPending('ws cerrado'); // libera los await colgados
       ws = null;
       scheduleRetry(); // Brave cerró/reinició → reconectar y reinstalar
     });
