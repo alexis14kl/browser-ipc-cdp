@@ -23,7 +23,7 @@
  */
 
 const path = require('path');
-const { startProxy } = require('./lib/cdp-proxy');
+const { startProxy } = require('./src/services/cdp-proxy');
 const { getPlatformHelper, getPlatformId } = require('./src/platform');
 const { createLogger } = require('./src/views/logger');
 const { createCdpInfoView } = require('./src/views/cdp-info-view');

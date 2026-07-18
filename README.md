@@ -138,7 +138,7 @@ Mejoras v2.3.1:
 | `brave_ipc.py` | Launcher principal. Abre Brave con CDP dinamico via IPC |
 | `brave_cdp.bat` | Doble-click para ejecutar brave_ipc.py |
 | `brave_mcp_launcher.js` | Wrapper MCP que resuelve el puerto dinamico y lanza chrome-devtools-mcp detras del proxy |
-| `lib/cdp-proxy.js` | Proxy CDP en puerto fijo con re-resolucion on-demand y tunel WebSocket |
+| `src/services/cdp-proxy.js` | Proxy CDP en puerto fijo con re-resolucion on-demand y tunel WebSocket |
 | `cdp_info.json` | Se genera al ejecutar. Contiene puerto, WebSocket, PID, etc. |
 | `README.md` | Este archivo |
 

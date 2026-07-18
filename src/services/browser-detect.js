@@ -2,7 +2,7 @@ const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const { log, success, warn } = require('./logger');
+const { log, success, warn } = require('../views/logger');
 
 const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
@@ -210,7 +210,7 @@ function findBrowser(preferred) {
     return browsers.find(b => b.name === preferred.toLowerCase()) || null;
   }
   // Config guardada
-  const configPath = path.join(__dirname, '..', 'browser_config.json');
+  const configPath = path.join(__dirname, '..', '..', 'browser_config.json');
   if (fs.existsSync(configPath)) {
     try {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));

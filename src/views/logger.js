@@ -31,4 +31,11 @@ function createLogger({ stream = process.stderr, prefix = '' } = {}) {
   };
 }
 
-module.exports = { createLogger };
+/**
+ * Logger por defecto a stdout — para los módulos del instalador (CLI) que
+ * loguean con funciones sueltas { log, success, warn, error }. El launcher
+ * MCP NO usa este: crea el suyo apuntando a stderr.
+ */
+const defaultLogger = createLogger({ stream: process.stdout, prefix: '  ' });
+
+module.exports = { createLogger, ...defaultLogger };

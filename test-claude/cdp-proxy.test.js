@@ -1,5 +1,5 @@
 /**
- * Tests de comportamiento del proxy CDP dinámico (lib/cdp-proxy.js).
+ * Tests de comportamiento del proxy CDP dinámico (src/services/cdp-proxy.js).
  *
  * Capturan el contrato que NO puede romperse en el refactor:
  *  - reescritura del host:puerto del backend en los bodies JSON
@@ -16,7 +16,7 @@ const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const { startProxy } = require('../lib/cdp-proxy');
+const { startProxy } = require('../src/services/cdp-proxy');
 const { randomPort, startFakeCdp, httpGet, waitFor, closeServer, trackSockets } = require('./helpers');
 
 const noop = () => {};
@@ -90,8 +90,8 @@ test('proxy re-resuelve solo cuando el backend "reinicia" en otro puerto', async
 
 test('proxy reclama el puerto fijo a un proxy huérfano de otra sesión', async () => {
   const fixedPort = randomPort();
-  // Proxy "huérfano": proceso hijo corriendo lib/cdp-proxy.js standalone
-  const child = spawn(process.execPath, [path.join(__dirname, '..', 'lib', 'cdp-proxy.js')], {
+  // Proxy "huérfano": proceso hijo corriendo src/services/cdp-proxy.js standalone
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'services', 'cdp-proxy.js')], {
     env: { ...process.env, PROXY_PORT: String(fixedPort), BACKEND_PORT: '1' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });

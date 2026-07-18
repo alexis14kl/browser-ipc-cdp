@@ -12,10 +12,10 @@
  */
 const http = require('http');
 
-const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP, IS_WSL, IS_WIN, IS_MAC } = require('../../lib/browser');
-const { setupPortproxy, setupFirewall } = require('../../lib/network');
-const { updateMcpJson, getWslHostIp } = require('../../lib/mcp');
-const { saveCdpInfo, loadCdpInfo } = require('../../lib/config');
+const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP, IS_WSL, IS_WIN, IS_MAC } = require('../services/browser-detect');
+const { setupPortproxy, setupFirewall } = require('../services/network');
+const { updateMcpJson, getWslHostIp } = require('../services/mcp-config');
+const { saveCdpInfo, loadCdpInfo } = require('../views/cli-cdp-info');
 
 function fetchJson(url) {
   return new Promise((resolve, reject) => {

@@ -92,7 +92,7 @@ test-claude/                          ← node:test, sin dependencias nuevas
 | launcher: `writeCdpInfo()` | `views/cdp-info-view.js` |
 | launcher: `startDynamicProxy()` + `main()` | `controllers/mcp-controller.js` |
 | launcher: `log()` (stderr) | `views/logger.js` con stream=stderr |
-| lib/cdp-proxy.js completo (probeProxy, reclaimPort, startProxy…) | `services/cdp-proxy.js` (movido, logger inyectado) |
+| src/services/cdp-proxy.js completo (probeProxy, reclaimPort, startProxy…) | `services/cdp-proxy.js` (movido, logger inyectado) |
 | lib/browser.js: `detectBrowsers/findBrowser/getBrowserPaths` | `models/browser-registry.js` + platform helpers |
 | lib/browser.js: `detectExistingCDP` | `cdp-service.resolve()` (misma cascada) |
 | lib/browser.js: `launchBrowser/killBrowser/isBrowserRunning` | `cdp-service.launch()` + `platform/*.js` |
