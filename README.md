@@ -62,6 +62,20 @@ Distribuida bajo licencia **MIT** — el autor (`Alexis Malambo`) no se hace res
 
 ---
 
+## 💖 Apoya el proyecto
+
+Cree `browser-ipc-cdp` como solucion de IA para **mantener tus sesiones reales activas** y que un asistente (Claude Code) pueda controlar tu navegador via el **MCP de Brave** — sin perder cookies, 2FA ni extensiones.
+
+Es software libre (MIT) y lo mantengo en mi tiempo. Si te sirvio o te ahorro trabajo, podes invitarme un cafe:
+
+[![Donar con PayPal](https://img.shields.io/badge/Donar-PayPal-00457C?logo=paypal&logoColor=white&style=for-the-badge)](https://www.paypal.com/donate/?business=rapalexism@gmail.com&no_recurring=0&item_name=Apoyo+a+browser-ipc-cdp&currency_code=USD)
+
+👉 **[paypal.com/donate → rapalexism@gmail.com](https://www.paypal.com/donate/?business=rapalexism@gmail.com&no_recurring=0&item_name=Apoyo+a+browser-ipc-cdp&currency_code=USD)**
+
+Cualquier aporte ayuda a seguir mejorando el proyecto. Gracias! 🙌
+
+---
+
 # Documentacion
 
 ## Que es esto?
