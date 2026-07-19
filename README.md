@@ -1,5 +1,8 @@
 # browser-ipc-cdp
 
+[![Windows](https://img.shields.io/badge/Windows-0078D6?logo=windows&logoColor=white)](#) [![macOS](https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white)](#) [![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](#) [![WSL](https://img.shields.io/badge/WSL-4D4D4D?logo=linux&logoColor=white)](#)
+[![npm](https://img.shields.io/npm/v/browser-ipc-cdp?logo=npm&color=CB3837)](https://www.npmjs.com/package/browser-ipc-cdp) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 Control remoto de navegadores Chromium (Brave, Chrome, Edge) via IPC con CDP dinamico. Abre tu navegador real con todas tus sesiones, detecta o asigna puerto automaticamente, configura portproxy/firewall para WSL, y actualiza el MCP de Claude Code. Sin puertos fijos, sin hacks de registry, sin configuracion manual.
 
 ```bash
