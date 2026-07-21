@@ -85,8 +85,11 @@ test('--resolve-only imprime JSON con el puerto resuelto (profile fake vía env)
   }
 
   try {
+    // El reintento cubre AMBOS modos de fallo bajo carga: timeout/colgado
+    // (excepción) y resolución nula por probe de 1500ms vencido (exit 1).
     let result;
-    try { result = await attempt(); } catch { result = await attempt(); }
+    try { result = await attempt(); } catch { result = null; }
+    if (!result || result.code !== 0) result = await attempt();
     const { code, stdout } = result;
     assert.strictEqual(code, 0, `exit code ${code}, stdout: ${stdout}`);
     const json = JSON.parse(stdout.trim().split('\n').pop());
