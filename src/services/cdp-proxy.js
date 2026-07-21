@@ -68,7 +68,10 @@ async function reclaimPort(port, log) {
   if (!pid || pid === process.pid) return;
   log(`proxy: :${port} ocupado por proxy huérfano (pid ${pid}), reemplazándolo`);
   try { process.kill(pid); } catch { return; }
-  for (let i = 0; i < 20; i++) {
+  // 5s de espera: en máquinas lentas (runners de CI compartidos) el proceso
+  // puede tardar >2s en morir y soltar el puerto; si no llega, el caller cae
+  // al siguiente puerto (comportamiento seguro, solo pierde el puerto fijo).
+  for (let i = 0; i < 50; i++) {
     if (await probeProxy(port) === 'free') return;
     await new Promise((r) => setTimeout(r, 100));
   }

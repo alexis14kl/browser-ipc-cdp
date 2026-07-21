@@ -445,4 +445,6 @@ function launchBrowser(browser, { port = 0, clean = false } = {}) {
   });
 }
 
-module.exports = { detectBrowsers, findBrowser, detectExistingCDP, launchBrowser };
+// isBrowserRunning se exporta para que los tests verifiquen la precondición
+// (pgrep/tasklist ve al proceso) antes de exigir resultados que dependen de él.
+module.exports = { detectBrowsers, findBrowser, detectExistingCDP, launchBrowser, isBrowserRunning };
