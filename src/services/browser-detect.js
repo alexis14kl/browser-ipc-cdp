@@ -211,8 +211,9 @@ function findBrowser(preferred) {
   if (preferred) {
     return browsers.find(b => b.name === preferred.toLowerCase()) || null;
   }
-  // Config guardada
-  const configPath = path.join(__dirname, '..', '..', 'browser_config.json');
+  // Preferencia guardada en ~/.browser-ipc-cdp/ (sobrevive updates de la
+  // ruta fija app/, que se borra entera en cada swap; --uninstall la limpia)
+  const configPath = path.join(HOME, '.browser-ipc-cdp', 'browser_config.json');
   if (fs.existsSync(configPath)) {
     try {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -224,6 +225,7 @@ function findBrowser(preferred) {
   // Primer navegador encontrado
   if (browsers.length > 0) {
     try {
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, JSON.stringify(browsers[0], null, 2));
     } catch (e) {}
     return browsers[0];

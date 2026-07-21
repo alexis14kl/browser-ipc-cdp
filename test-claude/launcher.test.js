@@ -24,9 +24,19 @@ const LAUNCHER = path.join(__dirname, '..', 'brave_mcp_launcher.js');
 const HANDSHAKE_BUDGET_MS = 15000; // Claude Code corta a los 30s; exigimos la mitad
 
 function spawnLauncher(args, extraEnv = {}) {
+  // HOME/USERPROFILE aislados: el launcher escribe cdp_info.json en la ruta
+  // canónica (~) y escanea perfiles desde ahí — sin esto, los tests pisarían
+  // el estado REAL del usuario y verían sus navegadores.
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'launcher-home-'));
   return spawn(process.execPath, [LAUNCHER, ...args], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, BROWSER_CDP_PROXY_PORT: String(randomPort()), ...extraEnv },
+    env: {
+      ...process.env,
+      HOME: fakeHome,
+      USERPROFILE: fakeHome,
+      BROWSER_CDP_PROXY_PORT: String(randomPort()),
+      ...extraEnv,
+    },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }

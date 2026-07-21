@@ -16,7 +16,7 @@ const { getPlatformId } = require('../platform');
 const { setupPortproxy, setupFirewall } = require('../services/network');
 const { updateMcpJson, getWslHostIp, removeBraveConfig } = require('../services/mcp-config');
 const { ensureInstalled, uninstall, checkForUpdate, installedVersion } = require('../services/update');
-const { saveCdpInfo, loadCdpInfo } = require('../views/cli-cdp-info');
+const { saveCdpInfo, loadCdpInfo, removeCdpInfo } = require('../views/cdp-info-view');
 
 const PLATFORM_LABEL = { win32: 'Windows', wsl: 'WSL (Windows host)', darwin: 'macOS', linux: 'Linux' };
 
@@ -44,7 +44,9 @@ function createCliController({ logger }) {
         log(`Puerto CDP: ${info.DEBUG_PORT}`);
         log(`Navegador:  ${info.BROWSER}`);
         log(`Modo:       ${info.MODE || 'LAUNCHED'}`);
-        log(`Paginas:    ${info.PAGES}`);
+        // PAGES solo lo escribe el CLI; el MCP (modo PROXY) no lo reporta.
+        if (info.PAGES !== undefined) log(`Paginas:    ${info.PAGES}`);
+        if (info.CDP_URL) log(`CDP URL:    ${info.CDP_URL}`);
       } else {
         warn('No hay sesion CDP activa. Ejecuta: npx browser-ipc-cdp');
       }
@@ -56,6 +58,8 @@ function createCliController({ logger }) {
       const removed = removeBraveConfig();
       log(`Entradas MCP "brave" eliminadas: ${removed}`);
       if (uninstall()) log('Copia fija ~/.browser-ipc-cdp eliminada.');
+      const infoRemoved = removeCdpInfo();
+      if (infoRemoved) log(`cdp_info.json eliminado (${infoRemoved} archivos).`);
       success('Desinstalado. Reinicia Claude Code para que deje de listar el MCP.');
       process.exit(0);
     }

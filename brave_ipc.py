@@ -29,9 +29,12 @@ from pathlib import Path
 
 # ─── Configuración ────────────────────────────────────────────────────────────
 
-# Archivo de configuración persistente (se genera al primer uso)
-CONFIG_FILE = Path(__file__).parent / "browser_config.json"
-IPC_INFO_FILE = Path(__file__).parent / "cdp_info.json"
+# Configuración persistente en ~/.browser-ipc-cdp/ (sobrevive updates de la
+# ruta fija app/ y se limpia con --uninstall)
+CONFIG_FILE = Path.home() / ".browser-ipc-cdp" / "browser_config.json"
+# Estado CDP en la ruta canónica (~): NUNCA junto al script — en la ruta fija
+# (~/.browser-ipc-cdp/app) el swap de actualización borra el directorio entero.
+IPC_INFO_FILE = Path.home() / "cdp_info.json"
 
 # Rutas de búsqueda por navegador, según sistema operativo.
 # Path(p).exists() filtra las que no aplican, pero separamos por plataforma
@@ -152,6 +155,7 @@ def load_config() -> dict:
 
 def save_config(data: dict):
     """Guarda la configuración del navegador."""
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 

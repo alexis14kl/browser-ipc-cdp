@@ -192,3 +192,22 @@ Solución — `services/update.js`:
 nuevo, idempotencia, copia de dependencias hermanas, modo dev, registry falso
 para outdated true/false/null, uninstall y removeBraveEntry con rutas
 explícitas — nunca contra las configs reales de la máquina.
+
+## 9. cdp_info.json unificado (v3.2.3)
+
+La ruta fija trajo una consecuencia: el estado NO puede vivir junto al
+launcher, porque el swap de actualización borra `app/` entero. Además había
+dos vistas divergentes: el MCP escribía junto al launcher y `--status` leía
+cwd/home — en modo PROXY el status quedaba ciego.
+
+Unificación en `views/cdp-info-view.js` (absorbe `cli-cdp-info.js`, como
+pedía el diseño original):
+- Ruta canónica `~/cdp_info.json` (la histórica del contrato v2.3.x); el CLI
+  escribe además copia en cwd (compat legacy).
+- `loadCdpInfo()` elige el archivo MÁS RECIENTE por mtime: `--status` siempre
+  ve lo último, lo haya escrito el MCP (PROXY) o el CLI (ATTACHED/LAUNCHED).
+- `browser_config.json` (JS y Python) migra a `~/.browser-ipc-cdp/` — la
+  preferencia de navegador también sobrevive updates; `--uninstall` limpia
+  ambos estados.
+- Los tests que spawnean el launcher real aíslan HOME/USERPROFILE a un
+  tmpdir: la suite jamás toca el estado real del usuario.

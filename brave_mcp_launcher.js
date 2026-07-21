@@ -71,7 +71,9 @@ const cursorOverlay = process.env.BROWSER_CDP_CURSOR !== '0'
 const controller = createMcpController({
   cdp,
   startProxy,
-  cdpInfo: createCdpInfoView({ file: path.join(__dirname, 'cdp_info.json'), log }),
+  // cdp_info.json va a la ruta canónica (~), NUNCA junto al launcher: en la
+  // ruta fija el swap de actualización borraría el estado en cada update.
+  cdpInfo: createCdpInfoView({ log }),
   log,
   isWin: platformId === 'win32',
   cursorOverlay,
