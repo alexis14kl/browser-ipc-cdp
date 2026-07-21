@@ -93,3 +93,16 @@ test('logger inyectable: escribe SOLO en el stream inyectado, con prefijo', () =
     '[test] [OK] listo\n',
   ]);
 });
+
+test('win.userDataDirs: BROWSER_CDP_EXTRA_PROFILES con ruta C:\\ NO se parte por el ":"', () => {
+  const prev = process.env.BROWSER_CDP_EXTRA_PROFILES;
+  process.env.BROWSER_CDP_EXTRA_PROFILES = 'C:\\Users\\x\\Temp\\perfil;D:\\otro\\perfil';
+  try {
+    const extras = win.userDataDirs().filter((d) => d.name === 'env-extra').map((d) => d.path);
+    assert.deepStrictEqual(extras, ['C:\\Users\\x\\Temp\\perfil', 'D:\\otro\\perfil'],
+      'las letras de unidad sobreviven; solo ; y , separan en win32');
+  } finally {
+    if (prev === undefined) delete process.env.BROWSER_CDP_EXTRA_PROFILES;
+    else process.env.BROWSER_CDP_EXTRA_PROFILES = prev;
+  }
+});

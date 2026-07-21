@@ -33,12 +33,17 @@ function commonUserDataDirs() {
   ];
 }
 
-/** Suma los perfiles de BROWSER_CDP_EXTRA_PROFILES ("p1;p2" o "p1:p2" o "p1,p2"). */
-function withEnvExtraProfiles(dirs) {
+/**
+ * Suma los perfiles de BROWSER_CDP_EXTRA_PROFILES ("p1;p2" o "p1:p2" o "p1,p2").
+ * El separador lo decide cada plataforma: en Windows es /[;,]/ — el ':' NUNCA,
+ * porque partiría las rutas con letra de unidad ("C:\..." → "C" + "\...").
+ * Bug real detectado por CI: en win32 el launcher veía 0 profiles del env var.
+ */
+function withEnvExtraProfiles(dirs, sep = /[;:,]/) {
   const extra = process.env.BROWSER_CDP_EXTRA_PROFILES;
   if (!extra) return dirs;
   const out = [...dirs];
-  for (const item of extra.split(/[;:,]/)) {
+  for (const item of extra.split(sep)) {
     const trimmed = item.trim();
     if (trimmed) out.push({ name: 'env-extra', path: trimmed });
   }

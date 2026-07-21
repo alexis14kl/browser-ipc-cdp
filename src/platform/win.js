@@ -11,13 +11,14 @@ const LOCALAPPDATA = process.env.LOCALAPPDATA || path.join(HOME, 'AppData', 'Loc
 const CHROMIUM_IMAGES = ['brave.exe', 'chrome.exe', 'msedge.exe', 'chromium.exe'];
 
 function userDataDirs() {
+  // Separador SIN ':' — partiría las rutas con letra de unidad (C:\...)
   return withEnvExtraProfiles([
     { name: 'brave', path: path.join(LOCALAPPDATA, 'BraveSoftware', 'Brave-Browser', 'User Data') },
     { name: 'chrome', path: path.join(LOCALAPPDATA, 'Google', 'Chrome', 'User Data') },
     { name: 'edge', path: path.join(LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data') },
     { name: 'chromium', path: path.join(LOCALAPPDATA, 'Chromium', 'User Data') },
     ...commonUserDataDirs(),
-  ]);
+  ], /[;,]/);
 }
 
 /** Salida CSV de `tasklist /FI "IMAGENAME eq x.exe" /FO CSV /NH` → pids. */
