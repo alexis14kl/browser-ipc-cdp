@@ -23,12 +23,17 @@ function runCli(args) {
   });
 }
 
-test('--list: exit 0, banner y encabezado de navegadores por stdout', async () => {
+test('--list: lista navegadores (exit 0) o reporta su ausencia (exit 1), por stdout', async () => {
   const { code, stdout, stderr } = await runCli(['--list']);
-  assert.strictEqual(code, 0, `stderr: ${stderr}`);
   assert.match(stdout, /browser-ipc-cdp/, 'banner ausente');
   assert.match(stdout, /Plataforma:/);
-  assert.match(stdout, /Navegadores Chromium|No se encontraron/);
+  if (code === 0) {
+    assert.match(stdout, /Navegadores Chromium/);
+  } else {
+    // Entornos sin ningún Chromium (contenedores, CI mínimo): exit 1 con mensaje claro
+    assert.strictEqual(code, 1, `exit inesperado ${code}. stderr: ${stderr}`);
+    assert.match(stdout, /No se encontr/);
+  }
   assert.strictEqual(stderr.trim(), '', 'el CLI no debe escribir en stderr');
 });
 

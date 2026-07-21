@@ -16,6 +16,13 @@ const { createCursorOverlay } = require('../src/services/cursor-overlay');
 const { OVERLAY_SOURCE } = require('../src/views/overlay-script');
 const { waitFor, closeServer } = require('./helpers');
 
+// El overlay usa el WebSocket global de Node (>=21); en 18/20 la feature se
+// auto-deshabilita por diseño (guard + log en cursor-overlay.js:98). Estos
+// tests verifican el comportamiento CON WebSocket — sin él, se saltan.
+const NO_WS = typeof WebSocket === 'undefined'
+  ? 'WebSocket nativo no disponible (Node <21): el overlay se deshabilita solo'
+  : false;
+
 /**
  * Navegador CDP falso: acepta el WS, registra los métodos recibidos y puede
  * emitir Target.attachedToTarget para simular una página. Responde a todo
@@ -89,7 +96,7 @@ function decodeFrame(buf) {
   return data.toString('utf-8');
 }
 
-test('overlay: setAutoAttach al conectar e inyección al aparecer una página', async () => {
+test('overlay: setAutoAttach al conectar e inyección al aparecer una página', { skip: NO_WS }, async () => {
   const browser = await fakeBrowser();
   const overlay = createCursorOverlay({
     resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: browser.wsUrl } }),
@@ -123,7 +130,7 @@ test('overlay: setAutoAttach al conectar e inyección al aparecer una página', 
   }
 });
 
-test('overlay: si el WS cae a mitad de inyección, no cuelga ni fuga promesas', async () => {
+test('overlay: si el WS cae a mitad de inyección, no cuelga ni fuga promesas', { skip: NO_WS }, async () => {
   // Navegador que NUNCA responde los comandos → los send() quedarían colgados
   // si no fuera por failAllPending al cerrar (y el timeout defensivo).
   const http = require('http');
@@ -163,7 +170,7 @@ test('overlay: si el WS cae a mitad de inyección, no cuelga ni fuga promesas', 
   }
 });
 
-test('overlay: se reconecta solo si la conexión CDP cae', async () => {
+test('overlay: se reconecta solo si la conexión CDP cae', { skip: NO_WS }, async () => {
   const browser = await fakeBrowser();
   const overlay = createCursorOverlay({
     resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: browser.wsUrl } }),

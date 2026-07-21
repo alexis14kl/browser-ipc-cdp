@@ -33,7 +33,7 @@
   },
   "homepage": "https://github.com/alexis14kl/browser-ipc-cdp#readme",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   },
   "files": [
     "bin/",
@@ -44,6 +44,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test --test-concurrency=1 \"test-claude/*.test.js\""
+    "test": "node --test --test-concurrency=1"
   }
 }

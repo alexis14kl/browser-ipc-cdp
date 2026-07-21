@@ -1,0 +1,30 @@
+# CI multiplataforma (fase 4 del refactor v3.0.0, materializada en v3.2.0).
+# La suite es portable: los tests que dependen del entorno se saltan solos
+# con razón explícita (sin navegador, sin lsof, Node <21 sin WebSocket).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['20', '22']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # Pre-calienta el caché de npx: el test de handshake spawnea
+      # chrome-devtools-mcp vía npx con presupuesto de 15s.
+      - name: Prewarm chrome-devtools-mcp
+        run: npx -y chrome-devtools-mcp@latest --version
+        continue-on-error: true
+      - run: npm test

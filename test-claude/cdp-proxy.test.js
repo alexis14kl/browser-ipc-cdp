@@ -88,7 +88,20 @@ test('proxy re-resuelve solo cuando el backend "reinicia" en otro puerto', async
   }
 });
 
-test('proxy reclama el puerto fijo a un proxy huérfano de otra sesión', async () => {
+// reclaimPort identifica al dueño del puerto con lsof (posix) / netstat (win).
+// Sin lsof (contenedores mínimos) el código degrada a no-reclamar por diseño;
+// este test verifica el reclamo CON la herramienta presente.
+const NO_LSOF = (() => {
+  if (process.platform === 'win32') return false; // netstat siempre existe
+  try {
+    require('child_process').execSync('command -v lsof', { stdio: 'pipe', shell: '/bin/sh' });
+    return false;
+  } catch {
+    return 'sin lsof: reclaimPort degrada a no-reclamar (el caso ocupante-ajeno sí se testea)';
+  }
+})();
+
+test('proxy reclama el puerto fijo a un proxy huérfano de otra sesión', { skip: NO_LSOF }, async () => {
   const fixedPort = randomPort();
   // Proxy "huérfano": proceso hijo corriendo src/services/cdp-proxy.js standalone
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'services', 'cdp-proxy.js')], {
