@@ -123,15 +123,17 @@ function selfInstall({ srcDir = PACKAGE_ROOT, destRoot = defaultDestRoot(), log 
     if (fs.existsSync(from)) fs.cpSync(from, path.join(staging, entry), { recursive: true });
   }
 
-  // Dependencias (chrome-devtools-mcp): en el caché de npx / npm i -g viven
-  // como hermanas del paquete (<root>/node_modules/browser-ipc-cdp). Se copia
-  // SOLO la clausura de "dependencies" declaradas (BFS por los package.json
-  // del árbol plano): en npm i -g el node_modules hermano contiene TODOS los
-  // paquetes globales (npm, corepack...) y copiarlo entero sería absurdo.
-  // Si faltan, el launcher cae a su fallback npx (funcional, más lento).
+  // Dependencias (chrome-devtools-mcp): se copia SOLO la clausura de
+  // "dependencies" declaradas (BFS por los package.json). Cada dependencia
+  // puede vivir ANIDADA en srcDir/node_modules (layout de npm i -g) o como
+  // HERMANA en <root>/node_modules (layout del caché de npx) — se busca en
+  // ese orden. Nunca se copia el árbol entero: en npm i -g el hermano es el
+  // node_modules GLOBAL (npm, corepack...). Si una dependencia no aparece,
+  // el launcher cae a su fallback npx (funcional, más lento).
   const siblings = path.dirname(srcDir);
-  const depsDir = path.basename(siblings) === 'node_modules' ? siblings : path.join(srcDir, 'node_modules');
-  if (fs.existsSync(depsDir)) {
+  const depRoots = [path.join(srcDir, 'node_modules')];
+  if (path.basename(siblings) === 'node_modules') depRoots.push(siblings);
+  {
     const stagingDeps = path.join(staging, 'node_modules');
     const queue = Object.keys(readDeclaredDeps(srcDir));
     const seen = new Set([PACKAGE_NAME]); // el paquete mismo no es dependencia
@@ -139,8 +141,8 @@ function selfInstall({ srcDir = PACKAGE_ROOT, destRoot = defaultDestRoot(), log 
       const dep = queue.shift();
       if (seen.has(dep)) continue;
       seen.add(dep);
-      const from = path.join(depsDir, dep);
-      if (!fs.existsSync(from)) continue;
+      const from = depRoots.map((r) => path.join(r, dep)).find((p) => fs.existsSync(p));
+      if (!from) continue;
       const to = path.join(stagingDeps, dep);
       fs.mkdirSync(path.dirname(to), { recursive: true }); // paquetes @scope/x
       fs.cpSync(from, to, { recursive: true });

@@ -160,6 +160,30 @@ test('selfInstall: layout npm i -g — copia la clausura de dependencies, NO tod
   }
 });
 
+test('selfInstall: layout npm i -g con deps ANIDADAS — las encuentra dentro del paquete', () => {
+  // npm i -g anida las dependencias DENTRO del paquete
+  // (<global>/node_modules/browser-ipc-cdp/node_modules/chrome-devtools-mcp);
+  // el node_modules hermano es el global (npm, corepack) y no debe viajar.
+  const root = tmpdir('upd-gnest-');
+  const destRoot = tmpdir('upd-dest6-');
+  const nm = path.join(root, 'lib', 'node_modules');
+  const src = path.join(nm, 'browser-ipc-cdp');
+  fs.mkdirSync(path.join(src, 'node_modules', 'chrome-devtools-mcp'), { recursive: true });
+  fs.writeFileSync(path.join(src, 'node_modules', 'chrome-devtools-mcp', 'index.js'), '// dep anidada');
+  for (const pkg of ['npm', 'corepack']) {
+    fs.mkdirSync(path.join(nm, pkg), { recursive: true });
+  }
+  try {
+    fakePackage(src, '1.0.0');
+    const app = selfInstall({ srcDir: src, destRoot, log: noop });
+    const copied = fs.readdirSync(path.join(app, 'node_modules')).sort();
+    assert.deepStrictEqual(copied, ['chrome-devtools-mcp'], 'la dep anidada viaja; lo global no');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(destRoot, { recursive: true, force: true });
+  }
+});
+
 test('ensureInstalled: checkout git → modo dev, apunta al repo sin crear copia fija', () => {
   const src = tmpdir('upd-dev-');
   const destRoot = tmpdir('upd-dest3-');
