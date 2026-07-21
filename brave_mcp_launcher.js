@@ -34,8 +34,21 @@ const { createCursorOverlay } = require('./src/services/cursor-overlay');
 const { OVERLAY_SOURCE } = require('./src/views/overlay-script');
 const { createMcpController } = require('./src/controllers/mcp-controller');
 
+const { checkForUpdate, installedVersion } = require('./src/services/update');
+
 // MCP stdio: stdout es EXCLUSIVO del JSON-RPC; todo log va a stderr.
 const { log } = createLogger({ stream: process.stderr, prefix: '[brave-mcp] ' });
+
+// Versión corriendo + aviso de update (best-effort, jamás bloquea el
+// handshake): la config apunta a la ruta fija del UpdateService, pero si el
+// usuario aún no re-corrió el instalador tras publicarse una versión nueva,
+// este log es donde la IA (y el humano) se enteran de que corre código viejo.
+log(`browser-ipc-cdp v${installedVersion() || '?'}`);
+checkForUpdate().then((u) => {
+  if (u && u.outdated) {
+    log(`UPDATE disponible: v${u.latest} (corriendo v${u.current}). Ejecuta: npx -y browser-ipc-cdp@latest y reconecta con /mcp`);
+  }
+}).catch(() => {});
 
 const platformId = getPlatformId();
 const cdp = createCdpService({

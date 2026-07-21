@@ -47,6 +47,51 @@ function getWslHostIp() {
   return '127.0.0.1';
 }
 
+/** Rutas candidatas de .claude.json: home(s) y /mnt/c/Users/* desde WSL. */
+function claudeJsonCandidates() {
+  const candidates = new Set();
+  if (process.env.HOME) candidates.add(path.join(process.env.HOME, '.claude.json'));
+  if (process.env.USERPROFILE) candidates.add(path.join(process.env.USERPROFILE, '.claude.json'));
+  try {
+    if (fs.existsSync('/mnt/c/Users')) {
+      for (const user of fs.readdirSync('/mnt/c/Users')) {
+        const candidate = `/mnt/c/Users/${user}/.claude.json`;
+        if (fs.existsSync(candidate)) candidates.add(candidate);
+      }
+    }
+  } catch (e) {}
+  return candidates;
+}
+
+/**
+ * Rutas candidatas de .mcp.json: home, cwd, carpeta del paquete, y los
+ * .mcp.json ya existentes en subdirectorios del home y del Desktop (1 nivel).
+ */
+function mcpJsonCandidates() {
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+  const mcpPaths = new Set([
+    path.join(home, '.mcp.json'),
+    path.join(process.cwd(), '.mcp.json'),
+    path.join(__dirname, '..', '..', '.mcp.json'),
+  ]);
+  try {
+    for (const item of fs.readdirSync(home)) {
+      const candidate = path.join(home, item, '.mcp.json');
+      if (fs.existsSync(candidate)) mcpPaths.add(candidate);
+    }
+  } catch (e) {}
+  const desktop = path.join(home, 'Desktop');
+  try {
+    if (fs.existsSync(desktop)) {
+      for (const item of fs.readdirSync(desktop)) {
+        const candidate = path.join(desktop, item, '.mcp.json');
+        if (fs.existsSync(candidate)) mcpPaths.add(candidate);
+      }
+    }
+  } catch (e) {}
+  return mcpPaths;
+}
+
 function updateClaudeUserConfig(wrapperPath) {
   // Registra el MCP "brave" en scope user (~/.claude.json top-level mcpServers)
   // para que aparezca en /mcp desde cualquier directorio, sin depender del cwd.
@@ -57,19 +102,7 @@ function updateClaudeUserConfig(wrapperPath) {
     env: {},
   };
 
-  const candidates = new Set();
-  if (process.env.HOME) candidates.add(path.join(process.env.HOME, '.claude.json'));
-  if (process.env.USERPROFILE) candidates.add(path.join(process.env.USERPROFILE, '.claude.json'));
-
-  // Desde WSL: buscar tambien en /mnt/c/Users/*/.claude.json
-  try {
-    if (fs.existsSync('/mnt/c/Users')) {
-      for (const user of fs.readdirSync('/mnt/c/Users')) {
-        const candidate = `/mnt/c/Users/${user}/.claude.json`;
-        if (fs.existsSync(candidate)) candidates.add(candidate);
-      }
-    }
-  } catch (e) {}
+  const candidates = claudeJsonCandidates();
 
   let updated = 0;
   for (const p of candidates) {
@@ -94,54 +127,21 @@ function updateClaudeUserConfig(wrapperPath) {
   return updated;
 }
 
-function updateMcpJson(port, wslIp) {
+function updateMcpJson(port, wslIp, wrapperPath = path.join(__dirname, '..', '..', 'brave_mcp_launcher.js')) {
   // Estrategia: apuntar al wrapper Node dinamico.
   // El wrapper lee cdp_info.json en cada invocacion -> puerto siempre fresco.
-  // No hay que reescribir .mcp.json cuando cambia el puerto dinamico.
-  const wrapperPath = path.join(__dirname, '..', '..', 'brave_mcp_launcher.js');
+  // wrapperPath viene del UpdateService (ruta fija ~/.browser-ipc-cdp/app en
+  // instalaciones npx, el repo en modo dev): asi la config nunca queda
+  // apuntando a una copia vieja del cache de npx.
   const braveEntry = {
     command: 'node',
     args: [wrapperPath],
   };
 
-  // Rutas base donde buscar .mcp.json
   const home = process.env.USERPROFILE || process.env.HOME || '';
-  const cwd = process.cwd();
-  const scriptDir = path.join(__dirname, '..', '..');
+  const mcpPaths = mcpJsonCandidates();
 
-  // 1. Rutas fijas conocidas
-  const mcpPaths = new Set([
-    path.join(home, '.mcp.json'),           // Home del usuario
-    path.join(cwd, '.mcp.json'),            // Donde ejecuto npx
-    path.join(scriptDir, '.mcp.json'),      // Carpeta del paquete IPC
-  ]);
-
-  // 2. Buscar .mcp.json existentes en subdirectorios del home (1 nivel)
-  try {
-    const homeItems = fs.readdirSync(home);
-    for (const item of homeItems) {
-      const candidate = path.join(home, item, '.mcp.json');
-      if (fs.existsSync(candidate)) {
-        mcpPaths.add(candidate);
-      }
-    }
-  } catch (e) {}
-
-  // 3. En Windows: buscar en Desktop y sus subcarpetas
-  const desktop = path.join(home, 'Desktop');
-  try {
-    if (fs.existsSync(desktop)) {
-      const desktopItems = fs.readdirSync(desktop);
-      for (const item of desktopItems) {
-        const candidate = path.join(desktop, item, '.mcp.json');
-        if (fs.existsSync(candidate)) {
-          mcpPaths.add(candidate);
-        }
-      }
-    }
-  } catch (e) {}
-
-  // 4. Actualizar todos los .mcp.json encontrados
+  // Actualizar todos los .mcp.json encontrados
   let updated = 0;
   for (const mcpPath of mcpPaths) {
     try {
@@ -175,4 +175,32 @@ function updateMcpJson(port, wslIp) {
   return (updated + userUpdated) > 0;
 }
 
-module.exports = { getWslHostIp, updateMcpJson, updateClaudeUserConfig };
+/**
+ * Quita la entrada mcpServers.brave de los archivos dados, preservando el
+ * resto del contenido (write atomico tmp+rename). Núcleo con rutas explícitas
+ * para poder testearlo sin tocar las configs reales de la máquina.
+ */
+function removeBraveEntry(paths) {
+  let removed = 0;
+  for (const p of paths) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      if (!data.mcpServers || !data.mcpServers.brave) continue;
+      delete data.mcpServers.brave;
+      const tmp = p + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+      fs.renameSync(tmp, p);
+      removed++;
+      log(`        -> ${p} (brave eliminado)`);
+    } catch (e) {}
+  }
+  return removed;
+}
+
+/** Desinstalación: quita brave de todos los .mcp.json/.claude.json conocidos. */
+function removeBraveConfig() {
+  return removeBraveEntry([...mcpJsonCandidates(), ...claudeJsonCandidates()]);
+}
+
+module.exports = { getWslHostIp, updateMcpJson, updateClaudeUserConfig, removeBraveEntry, removeBraveConfig };

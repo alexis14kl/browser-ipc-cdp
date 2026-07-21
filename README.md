@@ -255,6 +255,37 @@ mcp__brave__list_network_requests → Ver requests de red
 
 ---
 
+## Actualizacion y desinstalacion
+
+El instalador se auto-copia a una **ruta fija** (`~/.browser-ipc-cdp/app`) y
+las configs MCP apuntan ahi — nunca al cache volatil de npx. Actualizar:
+
+```bash
+npx -y browser-ipc-cdp@latest
+```
+
+Eso reemplaza el contenido de la ruta fija con swap atomico: **lo viejo se
+borra por completo** (incluidos archivos que la version nueva ya no trae) y
+lo nuevo queda. Luego reconecta con `/mcp` en Claude Code para que el proceso
+MCP corra la version nueva.
+
+Ademas, tanto el CLI como el launcher MCP avisan si hay una version mas nueva
+en npm (chequeo best-effort contra el registry; sin red no molesta). El
+launcher loguea siempre su version a stderr (`[brave-mcp] browser-ipc-cdp vX.Y.Z`)
+para que sea obvio que version esta corriendo la IA.
+
+Desinstalar (borra la ruta fija y quita la entrada `brave` de los
+`.mcp.json`/`.claude.json` conocidos):
+
+```bash
+npx -y browser-ipc-cdp --uninstall
+```
+
+Modo desarrollo: si ejecutas el instalador desde un checkout git del repo, no
+se crea copia fija — las configs apuntan al repo (flujo `npm link` intacto).
+
+---
+
 ## Que es IPC?
 
 **Inter-Process Communication** — un proceso (brave_ipc.py) se comunica con otro (Brave) sin usar la red.

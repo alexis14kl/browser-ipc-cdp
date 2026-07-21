@@ -25,15 +25,19 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 
 /**
  * GET url y parsea la respuesta como JSON. Primitiva HTTP compartida:
- * testCdp se construye sobre ella y el CLI la usa para /json/list.
- * Rechaza en error de red, timeout, status != 200 o JSON inválido.
+ * testCdp se construye sobre ella, el CLI la usa para /json/list y el
+ * UpdateService para el registry de npm (por eso soporta http y https;
+ * CDP es siempre http local). Rechaza en error de red, timeout,
+ * status != 200 o JSON inválido.
  */
 function fetchJson(url, timeoutMs = 1500) {
   return new Promise((resolve, reject) => {
-    const req = http.get(url, { timeout: timeoutMs }, (res) => {
+    const lib = url.startsWith('https:') ? https : http;
+    const req = lib.get(url, { timeout: timeoutMs }, (res) => {
       if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
       let data = '';
       res.on('data', (c) => (data += c));

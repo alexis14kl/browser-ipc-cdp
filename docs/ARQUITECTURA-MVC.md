@@ -170,3 +170,25 @@ queda en `detectBrowsers/findBrowser/detectExistingCDP/launchBrowser`.
 DevToolsActivePort de `detectExistingCDP` contra un CDP falso, y dos reglas
 de arquitectura ejecutables: `process.platform` solo se consulta en
 `platform/index.js` y `testCdp` solo se define en `cdp-service.js`.
+
+## 8. UpdateService — ruta fija + swap atómico (v3.2.0)
+
+Problema: el instalador escribía en las configs la ruta absoluta de la copia
+desde donde corrió (p. ej. `~/.npm/_npx/<hash>/…`). Al publicar una versión
+nueva, la config seguía ejecutando la copia vieja: la IA trabajaba con código
+desactualizado aunque el paquete se actualizara en npm. Además `--uninstall`
+era un stub que no borraba nada.
+
+Solución — `services/update.js`:
+
+| Pieza | Qué hace |
+|---|---|
+| `ensureInstalled()` | Paso [6/7] del CLI: se auto-copia a `~/.browser-ipc-cdp/app` y devuelve la ruta del launcher que `updateMcpJson` escribe en las configs. Checkout git → modo dev, apunta al repo (npm link intacto). |
+| `selfInstall()` | Swap por rename (`app.new` → `app`, la vieja a `app.old` y se borra): **lo viejo desaparece por completo**, incluidos archivos que la versión nueva ya no trae. Idempotente por versión; si falla a medias, revierte. Copia también las dependencias hermanas del caché de npx (`chrome-devtools-mcp`) para que `require.resolve` del launcher las encuentre. |
+| `checkForUpdate()` | Compara la versión local contra el registry de npm usando el `fetchJson` de cdp-service (que ganó soporte https). Best-effort: sin red devuelve null, jamás rompe el flujo. El CLI avisa al final; el launcher MCP loguea su versión a stderr al arrancar y avisa si corre código viejo (fire-and-forget, no toca el handshake). |
+| `uninstall()` + `mcp-config.removeBraveConfig()` | `--uninstall` real: borra `~/.browser-ipc-cdp` y quita `mcpServers.brave` de los `.mcp.json`/`.claude.json` conocidos (write atómico, preserva el resto). |
+
+`test-claude/update.test.js` (9 tests): el swap borra lo viejo y deja lo
+nuevo, idempotencia, copia de dependencias hermanas, modo dev, registry falso
+para outdated true/false/null, uninstall y removeBraveEntry con rutas
+explícitas — nunca contra las configs reales de la máquina.

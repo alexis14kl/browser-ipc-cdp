@@ -14,7 +14,8 @@ const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP } = requir
 const { fetchJson } = require('../services/cdp-service');
 const { getPlatformId } = require('../platform');
 const { setupPortproxy, setupFirewall } = require('../services/network');
-const { updateMcpJson, getWslHostIp } = require('../services/mcp-config');
+const { updateMcpJson, getWslHostIp, removeBraveConfig } = require('../services/mcp-config');
+const { ensureInstalled, uninstall, checkForUpdate, installedVersion } = require('../services/update');
 const { saveCdpInfo, loadCdpInfo } = require('../views/cli-cdp-info');
 
 const PLATFORM_LABEL = { win32: 'Windows', wsl: 'WSL (Windows host)', darwin: 'macOS', linux: 'Linux' };
@@ -27,6 +28,7 @@ function createCliController({ logger }) {
     const platformId = getPlatformId();
     const platform = PLATFORM_LABEL[platformId];
     log(`Plataforma: ${platform}`);
+    log(`Version:    v${installedVersion() || '?'}`);
 
     if (flags.list) {
       const browsers = detectBrowsers();
@@ -51,15 +53,22 @@ function createCliController({ logger }) {
 
     if (flags.uninstall) {
       log('Limpiando configuracion...');
-      success('Desinstalado.');
+      const removed = removeBraveConfig();
+      log(`Entradas MCP "brave" eliminadas: ${removed}`);
+      if (uninstall()) log('Copia fija ~/.browser-ipc-cdp eliminada.');
+      success('Desinstalado. Reinicia Claude Code para que deje de listar el MCP.');
       process.exit(0);
     }
+
+    // Chequeo de versión en paralelo con la instalación (best-effort, nunca
+    // bloquea ni rompe el flujo); se reporta al final, antes del resumen.
+    const updatePromise = checkForUpdate();
 
     const preferredBrowser = flags.browser || '';
     const forcePort = parseInt(flags.port) || 0;
     const clean = !!flags.clean;
 
-    log('[1/6] Detectando navegador...');
+    log('[1/7] Detectando navegador...');
     const browser = findBrowser(preferredBrowser);
     if (!browser) {
       const available = detectBrowsers();
@@ -75,7 +84,7 @@ function createCliController({ logger }) {
     }
     success(`${browser.name} encontrado: ${browser.exe}`);
 
-    log('[2/6] Verificando CDP existente...');
+    log('[2/7] Verificando CDP existente...');
     const existingPort = await detectExistingCDP(browser);
     let port, mode, pid;
 
@@ -83,21 +92,24 @@ function createCliController({ logger }) {
       success(`CDP ya activo en puerto ${existingPort}. Sin reiniciar!`);
       port = existingPort; mode = 'ATTACHED'; pid = 0;
     } else {
-      log('[3/6] Lanzando navegador con CDP...');
+      log('[3/7] Lanzando navegador con CDP...');
       const result = await launchBrowser(browser, { port: forcePort, clean });
       port = result.port; mode = 'LAUNCHED'; pid = result.pid;
       success(`CDP activo en puerto ${port}`);
     }
 
-    log('[4/6] Configurando firewall...');
+    log('[4/7] Configurando firewall...');
     setupFirewall();
 
-    log('[5/6] Configurando portproxy para WSL...');
+    log('[5/7] Configurando portproxy para WSL...');
     setupPortproxy(port);
 
-    log('[6/6] Configurando MCP para Claude Code...');
+    log('[6/7] Instalando copia fija (helper de actualizacion)...');
+    const wrapperPath = ensureInstalled({ log, warn });
+
+    log('[7/7] Configurando MCP para Claude Code...');
     const wslIp = getWslHostIp();
-    updateMcpJson(port, wslIp);
+    updateMcpJson(port, wslIp, wrapperPath);
 
     let browserVersion = 'Unknown', wsUrl = '', pages = 0;
     try {
@@ -116,6 +128,11 @@ function createCliController({ logger }) {
     const cdpLocalUrl = `http://127.0.0.1:${port}`;
     const cdpWslUrl = `http://${wslIp}:${port}`;
     const cdpUrl = (platformId === 'wsl' || wslIp !== '127.0.0.1') ? cdpWslUrl : cdpLocalUrl;
+
+    const upd = await updatePromise;
+    if (upd && upd.outdated) {
+      warn(`Nueva version v${upd.latest} disponible (tienes v${upd.current}). Actualiza: npx -y browser-ipc-cdp@latest`);
+    }
 
     log('');
     log('='.repeat(55));
