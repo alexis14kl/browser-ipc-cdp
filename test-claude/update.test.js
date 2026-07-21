@@ -24,9 +24,11 @@ function tmpdir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-/** Paquete falso mínimo con la forma del real. */
+/** Paquete falso mínimo con la forma del real (declara su dependencia). */
 function fakePackage(dir, version) {
-  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'browser-ipc-cdp', version }));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+    name: 'browser-ipc-cdp', version, dependencies: { 'chrome-devtools-mcp': '*' },
+  }));
   fs.writeFileSync(path.join(dir, 'brave_mcp_launcher.js'), `// launcher v${version}`);
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'src', 'a.js'), `module.exports = '${version}';`);
@@ -46,6 +48,11 @@ test('cmpVersions: orden semver numérico (no lexicográfico)', () => {
   assert.ok(cmpVersions('3.2.0', '3.10.0') < 0, '10 > 2 numéricamente');
   assert.strictEqual(cmpVersions('3.1.1', '3.1.1'), 0);
   assert.ok(cmpVersions('4.0.0', '3.99.99') > 0);
+  // Partes faltantes = 0 (regresión: la resta con undefined daba NaN y
+  // NaN > 0 es false → el aviso de update callaba)
+  assert.ok(cmpVersions('3.1.1', '3.1') > 0, '"3.1" cuenta como 3.1.0');
+  assert.ok(cmpVersions('3.1', '3.1.1') < 0);
+  assert.strictEqual(cmpVersions('3.1', '3.1.0'), 0);
 });
 
 test('checkForUpdate: outdated true/false según el registry, null sin red', async () => {
@@ -120,6 +127,33 @@ test('selfInstall: idempotente con la misma versión y copia las dependencias he
     fs.writeFileSync(path.join(app, 'marca.txt'), 'intacto');
     selfInstall({ srcDir: src, destRoot, log: noop });
     assert.ok(fs.existsSync(path.join(app, 'marca.txt')), 'misma versión no reinstala');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(destRoot, { recursive: true, force: true });
+  }
+});
+
+test('selfInstall: layout npm i -g — copia la clausura de dependencies, NO todo lo global', () => {
+  // <prefix>/lib/node_modules contiene TODOS los paquetes globales; solo debe
+  // viajar la clausura de dependencies: chrome-devtools-mcp y sus transitivas.
+  const root = tmpdir('upd-glob-');
+  const destRoot = tmpdir('upd-dest5-');
+  const nm = path.join(root, 'lib', 'node_modules');
+  const src = path.join(nm, 'browser-ipc-cdp');
+  fs.mkdirSync(src, { recursive: true });
+  for (const pkg of ['chrome-devtools-mcp', 'ws-transitiva', 'npm', 'corepack']) {
+    fs.mkdirSync(path.join(nm, pkg), { recursive: true });
+    fs.writeFileSync(path.join(nm, pkg, 'index.js'), `// ${pkg}`);
+  }
+  // chrome-devtools-mcp declara una transitiva presente en el árbol plano
+  fs.writeFileSync(path.join(nm, 'chrome-devtools-mcp', 'package.json'),
+    JSON.stringify({ name: 'chrome-devtools-mcp', version: '1.0.0', dependencies: { 'ws-transitiva': '*' } }));
+  try {
+    fakePackage(src, '1.0.0');
+    const app = selfInstall({ srcDir: src, destRoot, log: noop });
+    const copied = fs.readdirSync(path.join(app, 'node_modules')).sort();
+    assert.deepStrictEqual(copied, ['chrome-devtools-mcp', 'ws-transitiva'],
+      'solo la clausura de dependencies (npm/corepack globales quedan fuera)');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(destRoot, { recursive: true, force: true });

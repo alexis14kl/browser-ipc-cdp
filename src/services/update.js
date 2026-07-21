@@ -49,12 +49,26 @@ function installedVersion(dir = PACKAGE_ROOT) {
   }
 }
 
-/** Compara "x.y.z" numéricamente: <0 si a<b, 0 si igual, >0 si a>b. */
+/** "dependencies" del package.json de un directorio (o {}). */
+function readDeclaredDeps(dir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8')).dependencies || {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Compara "x.y.z" numéricamente: <0 si a<b, 0 si igual, >0 si a>b.
+ * Partes faltantes cuentan como 0 ("3.1" === "3.1.0"): sin esto la resta
+ * con undefined da NaN y "outdated" quedaría en false en silencio.
+ */
 function cmpVersions(a, b) {
   const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
   const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < 3; i++) {
-    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+    const da = pa[i] || 0, db = pb[i] || 0;
+    if (da !== db) return da - db;
   }
   return 0;
 }
@@ -110,17 +124,27 @@ function selfInstall({ srcDir = PACKAGE_ROOT, destRoot = defaultDestRoot(), log 
   }
 
   // Dependencias (chrome-devtools-mcp): en el caché de npx / npm i -g viven
-  // como hermanas del paquete (<root>/node_modules/browser-ipc-cdp). Se copian
-  // a app/node_modules para que require.resolve del launcher las encuentre;
-  // si no están, el launcher cae a su fallback npx (funcional, más lento).
+  // como hermanas del paquete (<root>/node_modules/browser-ipc-cdp). Se copia
+  // SOLO la clausura de "dependencies" declaradas (BFS por los package.json
+  // del árbol plano): en npm i -g el node_modules hermano contiene TODOS los
+  // paquetes globales (npm, corepack...) y copiarlo entero sería absurdo.
+  // Si faltan, el launcher cae a su fallback npx (funcional, más lento).
   const siblings = path.dirname(srcDir);
   const depsDir = path.basename(siblings) === 'node_modules' ? siblings : path.join(srcDir, 'node_modules');
   if (fs.existsSync(depsDir)) {
     const stagingDeps = path.join(staging, 'node_modules');
-    fs.mkdirSync(stagingDeps, { recursive: true });
-    for (const entry of fs.readdirSync(depsDir)) {
-      if (entry === PACKAGE_NAME) continue; // el paquete mismo no es dependencia
-      fs.cpSync(path.join(depsDir, entry), path.join(stagingDeps, entry), { recursive: true });
+    const queue = Object.keys(readDeclaredDeps(srcDir));
+    const seen = new Set([PACKAGE_NAME]); // el paquete mismo no es dependencia
+    while (queue.length) {
+      const dep = queue.shift();
+      if (seen.has(dep)) continue;
+      seen.add(dep);
+      const from = path.join(depsDir, dep);
+      if (!fs.existsSync(from)) continue;
+      const to = path.join(stagingDeps, dep);
+      fs.mkdirSync(path.dirname(to), { recursive: true }); // paquetes @scope/x
+      fs.cpSync(from, to, { recursive: true });
+      queue.push(...Object.keys(readDeclaredDeps(from)));
     }
   }
 
