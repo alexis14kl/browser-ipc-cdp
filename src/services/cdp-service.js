@@ -1,9 +1,14 @@
 /**
  * CdpService — el helper central de CDP. ÚNICA implementación de:
+ *   - fetchJson (primitiva HTTP-JSON de los endpoints /json/*)
  *   - testCdp (verificación de endpoint vivo)
  *   - lectura de DevToolsActivePort
  *   - descubrimiento de perfiles con CDP activo
  *   - la cascada de resolución: ActivePort → procesos → auto-launch
+ *
+ * fetchJson/testCdp/readActivePort no dependen del factory y se exportan
+ * también como estáticas: browser-detect y el CLI consumen ESTAS en vez de
+ * duplicarlas (la duplicación fue la causa de la regresión v2.3.0).
  *
  * No conoce process.platform: recibe el PlatformHelper por inyección
  * (Strategy elegida en src/platform/index.js). El auto-launch también se
@@ -21,42 +26,52 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
+/**
+ * GET url y parsea la respuesta como JSON. Primitiva HTTP compartida:
+ * testCdp se construye sobre ella y el CLI la usa para /json/list.
+ * Rechaza en error de red, timeout, status != 200 o JSON inválido.
+ */
+function fetchJson(url, timeoutMs = 1500) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { timeout: timeoutMs }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+  });
+}
+
+/** GET /json/version; devuelve el JSON solo si hay webSocketDebuggerUrl. */
+async function testCdp(url, timeoutMs = 1500) {
+  try {
+    const json = await fetchJson(`${url}/json/version`, timeoutMs);
+    if (json && typeof json.webSocketDebuggerUrl === 'string' && json.webSocketDebuggerUrl) {
+      return json;
+    }
+  } catch {}
+  return null;
+}
+
+/** Lee el puerto del archivo DevToolsActivePort de un perfil (o null). */
+function readActivePort(userDataDir) {
+  const file = path.join(userDataDir, 'DevToolsActivePort');
+  if (!fs.existsSync(file)) return null;
+  try {
+    const txt = fs.readFileSync(file, 'utf-8');
+    const port = parseInt(txt.split(/\r?\n/)[0], 10);
+    if (Number.isFinite(port) && port > 0) return port;
+  } catch {}
+  return null;
+}
+
 function createCdpService({ platform, log = () => {}, autoLaunch = null }) {
   const HOME = process.env.USERPROFILE || process.env.HOME || '';
   const LOCALAPPDATA = process.env.LOCALAPPDATA || path.join(HOME, 'AppData', 'Local');
-
-  /** GET /json/version; devuelve el JSON solo si hay webSocketDebuggerUrl. */
-  function testCdp(url, timeoutMs = 1500) {
-    return new Promise((resolve) => {
-      const req = http.get(`${url}/json/version`, { timeout: timeoutMs }, (res) => {
-        if (res.statusCode !== 200) { res.resume(); return resolve(null); }
-        let data = '';
-        res.on('data', (c) => (data += c));
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            if (json && typeof json.webSocketDebuggerUrl === 'string' && json.webSocketDebuggerUrl) {
-              resolve(json);
-            } else { resolve(null); }
-          } catch { resolve(null); }
-        });
-      });
-      req.on('error', () => resolve(null));
-      req.on('timeout', () => { req.destroy(); resolve(null); });
-    });
-  }
-
-  /** Lee el puerto del archivo DevToolsActivePort de un perfil (o null). */
-  function readActivePort(userDataDir) {
-    const file = path.join(userDataDir, 'DevToolsActivePort');
-    if (!fs.existsSync(file)) return null;
-    try {
-      const txt = fs.readFileSync(file, 'utf-8');
-      const port = parseInt(txt.split(/\r?\n/)[0], 10);
-      if (Number.isFinite(port) && port > 0) return port;
-    } catch {}
-    return null;
-  }
 
   /**
    * Perfiles con DevToolsActivePort presente: los de la plataforma + escaneo
@@ -158,4 +173,4 @@ function createCdpService({ platform, log = () => {}, autoLaunch = null }) {
   return { testCdp, readActivePort, discoverProfiles, tryActivePort, firstLiveCdp, resolve };
 }
 
-module.exports = { createCdpService };
+module.exports = { createCdpService, fetchJson, testCdp, readActivePort };

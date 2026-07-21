@@ -1,14 +1,10 @@
 const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
 const { log, success, warn } = require('../views/logger');
+const { getPlatformId } = require('../platform');
 
-const IS_WIN = process.platform === 'win32';
-let IS_WSL = false;
-try {
-  const v = fs.readFileSync('/proc/version', 'utf-8').toLowerCase();
-  IS_WSL = v.includes('microsoft') || v.includes('wsl');
-} catch (e) {}
+const PLATFORM_ID = getPlatformId(); // detección única en src/platform
+const IS_WIN = PLATFORM_ID === 'win32';
+const IS_WSL = PLATFORM_ID === 'wsl';
 
 const FIREWALL_RULE = 'CDP All Ports (IPC)';
 

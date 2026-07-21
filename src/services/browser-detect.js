@@ -1,27 +1,29 @@
+/**
+ * Registry + detección + launch/kill de navegadores Chromium (lado CLI).
+ *
+ * No detecta plataforma ni verifica CDP por su cuenta: la plataforma viene
+ * de src/platform (único lugar que mira process.platform) y la verificación
+ * de endpoints y la lectura de DevToolsActivePort son las estáticas de
+ * cdp-service (única implementación). Aquí vive solo lo específico del
+ * instalador: dónde están los .exe, perfiles por navegador y launch/kill.
+ */
 const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
-const { log, success, warn } = require('../views/logger');
+const { log } = require('../views/logger');
+const { getPlatformId } = require('../platform');
+const { testCdp, readActivePort } = require('./cdp-service');
 
-const IS_WIN = process.platform === 'win32';
-const IS_MAC = process.platform === 'darwin';
-
-// Detectar WSL: Linux pero con acceso a Windows
-function isWSL() {
-  if (IS_WIN || IS_MAC) return false;
-  try {
-    const version = fs.readFileSync('/proc/version', 'utf-8').toLowerCase();
-    if (version.includes('microsoft') || version.includes('wsl')) return true;
-  } catch (e) {}
-  try {
-    return fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop');
-  } catch (e) {}
-  return false;
-}
-
-const IS_WSL = isWSL();
+const PLATFORM_ID = getPlatformId(); // 'win32'|'darwin'|'linux'|'wsl'
+const IS_WIN = PLATFORM_ID === 'win32';
+const IS_MAC = PLATFORM_ID === 'darwin';
+const IS_WSL = PLATFORM_ID === 'wsl';
 const HOME = process.env.HOME || process.env.USERPROFILE || '';
+
+/** testCdp canónico adaptado a puerto local (timeout 3000 heredado del CLI v2.x). */
+function testCdpPort(port, timeout = 3000) {
+  return testCdp(`http://127.0.0.1:${port}`, timeout);
+}
 
 // En WSL: obtener paths de Windows via /mnt/c/
 function getWindowsEnv(varName) {
@@ -229,21 +231,6 @@ function findBrowser(preferred) {
   return null;
 }
 
-function testCdp(port, timeout = 3000) {
-  return new Promise((resolve) => {
-    const req = http.get(`http://127.0.0.1:${port}/json/version`, { timeout }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { resolve(null); }
-      });
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
-  });
-}
-
 function isBrowserRunning(exe) {
   const exeName = path.basename(exe);
   try {
@@ -268,16 +255,10 @@ async function detectExistingCDP(browser) {
 
   // 1. DevToolsActivePort
   if (browser.userData) {
-    const portFile = path.join(browser.userData, 'DevToolsActivePort');
-    if (fs.existsSync(portFile)) {
-      try {
-        const lines = fs.readFileSync(portFile, 'utf-8').trim().split('\n');
-        const port = parseInt(lines[0].trim());
-        if (port > 0) {
-          const result = await testCdp(port);
-          if (result) return port;
-        }
-      } catch (e) {}
+    const port = readActivePort(browser.userData);
+    if (port) {
+      const result = await testCdpPort(port);
+      if (result) return port;
     }
   }
 
@@ -300,7 +281,7 @@ async function detectExistingCDP(browser) {
     if (match) {
       const port = parseInt(match[1]);
       if (port > 0) {
-        const cdp = await testCdp(port);
+        const cdp = await testCdpPort(port);
         if (cdp) return port;
       }
     }
@@ -346,7 +327,7 @@ async function detectExistingCDP(browser) {
               const portStr = tokens[1].split(':').pop();
               const port = parseInt(portStr);
               if (port > 1024) {
-                const cdp = await testCdp(port);
+                const cdp = await testCdpPort(port);
                 if (cdp) return port;
               }
             }
@@ -363,7 +344,7 @@ async function detectExistingCDP(browser) {
               if (match) {
                 const port = parseInt(match[1]);
                 if (port > 1024) {
-                  const cdp = await testCdp(port);
+                  const cdp = await testCdpPort(port);
                   if (cdp) return port;
                 }
               }
@@ -437,21 +418,13 @@ function launchBrowser(browser, { port = 0, clean = false } = {}) {
 
       // Wait for DevToolsActivePort
       if (port === 0) {
-        const activePortFile = userData ? path.join(userData, 'DevToolsActivePort') : null;
         const deadline = Date.now() + 30000;
         const check = () => {
           if (Date.now() > deadline) {
             return reject(new Error('Timeout esperando DevToolsActivePort'));
           }
-          if (activePortFile && fs.existsSync(activePortFile)) {
-            try {
-              const lines = fs.readFileSync(activePortFile, 'utf-8').trim().split('\n');
-              const detected = parseInt(lines[0].trim());
-              if (detected > 0) {
-                return resolve({ port: detected, pid: child.pid });
-              }
-            } catch (e) {}
-          }
+          const detected = userData ? readActivePort(userData) : null;
+          if (detected) return resolve({ port: detected, pid: child.pid });
           setTimeout(check, 500);
         };
         check();
@@ -462,7 +435,7 @@ function launchBrowser(browser, { port = 0, clean = false } = {}) {
           if (Date.now() > deadline) {
             return reject(new Error(`Timeout esperando CDP en puerto ${port}`));
           }
-          const result = await testCdp(port);
+          const result = await testCdpPort(port);
           if (result) return resolve({ port, pid: child.pid });
           setTimeout(check, 500);
         };
@@ -472,4 +445,4 @@ function launchBrowser(browser, { port = 0, clean = false } = {}) {
   });
 }
 
-module.exports = { detectBrowsers, findBrowser, detectExistingCDP, launchBrowser, testCdp, IS_WSL, IS_WIN, IS_MAC };
+module.exports = { detectBrowsers, findBrowser, detectExistingCDP, launchBrowser };

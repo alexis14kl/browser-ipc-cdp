@@ -2,9 +2,10 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { log, success, warn } = require('../views/logger');
+const { getPlatformId } = require('../platform');
 
 function getWslHostIp() {
-  const IS_WIN = process.platform === 'win32';
+  const IS_WIN = getPlatformId() === 'win32';
 
   // Mac/Linux nativo (sin WSL): localhost directo
   if (!IS_WIN && !fs.existsSync('/proc/version')) return '127.0.0.1';

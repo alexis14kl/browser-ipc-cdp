@@ -7,7 +7,11 @@ const fs = require('fs');
 function detectWsl() {
   try {
     const v = fs.readFileSync('/proc/version', 'utf-8').toLowerCase();
-    return v.includes('microsoft') || v.includes('wsl');
+    if (v.includes('microsoft') || v.includes('wsl')) return true;
+  } catch {}
+  // Algunos WSL2 no dicen "microsoft" en /proc/version; WSLInterop sí existe.
+  try {
+    return fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop');
   } catch {
     return false;
   }

@@ -150,3 +150,23 @@ Agregado fuera del diseño original: `services/cursor-overlay.js` +
 `views/overlay-script.js` — overlay visual del cursor inyectado vía CDP en
 todas las páginas (v3.0.0 opt-in, v3.0.1 ON por defecto con opt-out
 `BROWSER_CDP_CURSOR=0`).
+
+## 7. Deduplicación del lado CLI (post v3.1.0)
+
+`services/browser-detect.js` (el instalador heredado de `lib/browser.js`)
+conservaba copias propias de lo que la sección 2 declaraba único. Se cerró
+esa deuda: ahora **"el CLI y el MCP consumen el MISMO servicio"** también es
+cierto del lado CLI.
+
+| Copia eliminada | Fuente única |
+|---|---|
+| `testCdp` de browser-detect (y `fetchJson` de cli-controller) | `cdp-service` exporta `fetchJson`/`testCdp`/`readActivePort` como **estáticas** además del factory |
+| Lecturas inline de `DevToolsActivePort` (detectExistingCDP, launchBrowser) | `cdp-service.readActivePort()` |
+| `IS_WIN/IS_MAC/isWSL` de browser-detect, network y mcp-config; `process.platform` en cdp-proxy | `platform/index.getPlatformId()` — que absorbió el chequeo `WSLInterop` que solo tenía browser-detect |
+
+`browser-detect` ya no exporta `testCdp`/`IS_*` (sin consumidores); su API
+queda en `detectBrowsers/findBrowser/detectExistingCDP/launchBrowser`.
+`test-claude/browser-detect.test.js` cubre las estáticas, el camino
+DevToolsActivePort de `detectExistingCDP` contra un CDP falso, y dos reglas
+de arquitectura ejecutables: `process.platform` solo se consulta en
+`platform/index.js` y `testCdp` solo se define en `cdp-service.js`.

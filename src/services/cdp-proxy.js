@@ -21,6 +21,7 @@ const http = require('http');
 const net = require('net');
 const { execFile } = require('child_process');
 const { createInputTap } = require('./ws-tap');
+const { getPlatformId } = require('../platform');
 
 const PROXY_HOST = '127.0.0.1';
 // Cache negativo: con el navegador caído, no re-escanear (ps/lsof/probes) en cada request.
@@ -43,7 +44,7 @@ function probeProxy(port) {
 
 function listenerPid(port) {
   return new Promise((resolve) => {
-    if (process.platform === 'win32') {
+    if (getPlatformId() === 'win32') {
       execFile('netstat', ['-ano', '-p', 'tcp'], (err, out) => {
         if (err) return resolve(null);
         const line = out.split('\n').find((l) => l.includes(`:${port}`) && /LISTENING/i.test(l));

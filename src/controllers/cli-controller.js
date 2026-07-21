@@ -2,39 +2,30 @@
  * CliController — flujo del instalador `npx browser-ipc-cdp`.
  *
  * Orquesta la detección/lanzamiento del navegador y la configuración de
- * portproxy/firewall/.mcp.json para conectar Claude Code. La implementación
- * por plataforma del lado CLI vive en lib/ (browser/network/mcp), que es el
- * instalador estable heredado; este controller solo la coordina y usa el
+ * portproxy/firewall/.mcp.json para conectar Claude Code. La lógica vive en
+ * services/ (browser-detect/network/mcp-config) y las verificaciones CDP en
+ * las estáticas de cdp-service; este controller solo coordina y usa el
  * logger inyectable (a stdout, porque el CLI no habla protocolo por stdout).
  *
  * Comportamiento 1:1 del bin/cli.js v2.3.x. Flags: --list --status --uninstall
  * --browser <b> --port <n> --clean.
  */
-const http = require('http');
-
-const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP, IS_WSL, IS_WIN, IS_MAC } = require('../services/browser-detect');
+const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP } = require('../services/browser-detect');
+const { fetchJson } = require('../services/cdp-service');
+const { getPlatformId } = require('../platform');
 const { setupPortproxy, setupFirewall } = require('../services/network');
 const { updateMcpJson, getWslHostIp } = require('../services/mcp-config');
 const { saveCdpInfo, loadCdpInfo } = require('../views/cli-cdp-info');
 
-function fetchJson(url) {
-  return new Promise((resolve, reject) => {
-    http.get(url, { timeout: 5000 }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
-      });
-    }).on('error', reject);
-  });
-}
+const PLATFORM_LABEL = { win32: 'Windows', wsl: 'WSL (Windows host)', darwin: 'macOS', linux: 'Linux' };
 
 function createCliController({ logger }) {
   const { log, success, warn, error, banner } = logger;
 
   async function run(flags) {
     banner();
-    const platform = IS_WIN ? 'Windows' : IS_WSL ? 'WSL (Windows host)' : IS_MAC ? 'macOS' : 'Linux';
+    const platformId = getPlatformId();
+    const platform = PLATFORM_LABEL[platformId];
     log(`Plataforma: ${platform}`);
 
     if (flags.list) {
@@ -110,10 +101,10 @@ function createCliController({ logger }) {
 
     let browserVersion = 'Unknown', wsUrl = '', pages = 0;
     try {
-      const versionData = await fetchJson(`http://127.0.0.1:${port}/json/version`);
+      const versionData = await fetchJson(`http://127.0.0.1:${port}/json/version`, 5000);
       browserVersion = versionData.Browser || 'Unknown';
       wsUrl = versionData.webSocketDebuggerUrl || '';
-      const pageList = await fetchJson(`http://127.0.0.1:${port}/json/list`);
+      const pageList = await fetchJson(`http://127.0.0.1:${port}/json/list`, 5000);
       pages = Array.isArray(pageList) ? pageList.length : 0;
     } catch (e) {}
 
@@ -124,7 +115,7 @@ function createCliController({ logger }) {
 
     const cdpLocalUrl = `http://127.0.0.1:${port}`;
     const cdpWslUrl = `http://${wslIp}:${port}`;
-    const cdpUrl = (IS_WSL || wslIp !== '127.0.0.1') ? cdpWslUrl : cdpLocalUrl;
+    const cdpUrl = (platformId === 'wsl' || wslIp !== '127.0.0.1') ? cdpWslUrl : cdpLocalUrl;
 
     log('');
     log('='.repeat(55));
