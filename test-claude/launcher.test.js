@@ -84,8 +84,10 @@ test('--resolve-only imprime JSON con el puerto resuelto (profile fake vía env)
     try {
       return await new Promise((resolve, reject) => {
         let out = '';
+        let err = '';
         child.stdout.on('data', (d) => (out += d.toString('utf-8')));
-        child.on('exit', (code) => resolve({ code, stdout: out }));
+        child.stderr.on('data', (d) => (err += d.toString('utf-8')));
+        child.on('exit', (code) => resolve({ code, stdout: out, stderr: err }));
         child.on('error', reject);
         setTimeout(() => reject(new Error('timeout --resolve-only')), 40000);
       });
@@ -100,8 +102,8 @@ test('--resolve-only imprime JSON con el puerto resuelto (profile fake vía env)
     let result;
     try { result = await attempt(); } catch { result = null; }
     if (!result || result.code !== 0) result = await attempt();
-    const { code, stdout } = result;
-    assert.strictEqual(code, 0, `exit code ${code}, stdout: ${stdout}`);
+    const { code, stdout, stderr } = result;
+    assert.strictEqual(code, 0, `exit code ${code}, stdout: ${stdout}\nstderr del launcher:\n${stderr}`);
     const json = JSON.parse(stdout.trim().split('\n').pop());
     assert.ok(Number.isInteger(json.port) && json.port > 0, `puerto inválido en ${stdout}`);
     assert.ok(typeof json.browser === 'string' && json.browser.length > 0);
@@ -121,6 +123,8 @@ test('--proxy-only levanta el proxy con el header identificador', async () => {
     BROWSER_CDP_PROXY_PORT: String(proxyPort),
     BROWSER_CDP_EXTRA_PROFILES: profileDir,
   });
+  let stderr = '';
+  child.stderr.on('data', (d) => (stderr += d.toString('utf-8')));
   try {
     const up = await waitFor(async () => {
       try {
@@ -128,7 +132,7 @@ test('--proxy-only levanta el proxy con el header identificador', async () => {
         return res.headers['x-cdp-proxy'] === 'browser-ipc-cdp';
       } catch { return false; }
     }, { timeoutMs: 15000 });
-    assert.ok(up, 'el proxy-only debía responder con x-cdp-proxy');
+    assert.ok(up, `el proxy-only debía responder con x-cdp-proxy. stderr del launcher:\n${stderr}`);
   } finally {
     try { child.kill('SIGTERM'); } catch {}
     await closeServer(backend);
