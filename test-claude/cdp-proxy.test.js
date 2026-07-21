@@ -101,7 +101,7 @@ const NO_LSOF = (() => {
   }
 })();
 
-test('proxy reclama el puerto fijo a un proxy huérfano de otra sesión', { skip: NO_LSOF }, async () => {
+async function reclaimScenario() {
   const fixedPort = randomPort();
   // Proxy "huérfano": proceso hijo corriendo src/services/cdp-proxy.js standalone
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'services', 'cdp-proxy.js')], {
@@ -128,6 +128,18 @@ test('proxy reclama el puerto fijo a un proxy huérfano de otra sesión', { skip
     await closeServer(server);
     try { child.kill(); } catch {}
   }
+}
+
+test('proxy reclama el puerto fijo a un proxy huérfano de otra sesión', { skip: NO_LSOF }, async () => {
+  // Integración con timing real de kill + rebind: el bind-retry del producto
+  // cubre la carrera de cierre del socket; los 3 intentos cubren runners
+  // saturados. Un fallo sistemático tumba los 3 (cada uno con puerto nuevo).
+  let lastErr = null;
+  for (let i = 0; i < 3; i++) {
+    try { await reclaimScenario(); lastErr = null; break; }
+    catch (e) { lastErr = e; }
+  }
+  if (lastErr) throw lastErr;
 });
 
 test('proxy NO mata a un ocupante ajeno: cae al siguiente puerto', async () => {

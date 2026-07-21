@@ -236,9 +236,16 @@ async function startProxy({ preferredPort, initialBackend = null, resolveBackend
 
   listenPort = await new Promise((resolve, reject) => {
     let attempt = 0;
+    let preferredRetries = 0;
     const tryPort = (p) => {
       server.once('error', (e) => {
-        if (e.code === 'EADDRINUSE' && ++attempt < maxPortAttempts) {
+        if (e.code === 'EADDRINUSE' && p === preferredPort && ++preferredRetries <= 3) {
+          // El bind justo después de matar al huérfano puede chocar con su
+          // socket aún en cierre (carrera de ms, típica de Linux): el probe
+          // HTTP ya dio ECONNREFUSED pero el bind aún falla. Reintentar el
+          // puerto PREFERIDO antes de rendirse y saltar al siguiente.
+          setTimeout(() => tryPort(p), 250);
+        } else if (e.code === 'EADDRINUSE' && ++attempt < maxPortAttempts) {
           log(`proxy: :${p} ocupado, probando :${preferredPort + attempt}`);
           tryPort(preferredPort + attempt);
         } else {

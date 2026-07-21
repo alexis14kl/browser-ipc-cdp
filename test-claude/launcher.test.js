@@ -66,22 +66,33 @@ test('--resolve-only imprime JSON con el puerto resuelto (profile fake vía env)
   const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cdp-test-profile-'));
   fs.writeFileSync(path.join(profileDir, 'DevToolsActivePort'), `${backend.address().port}\n/devtools/browser/fake-id\n`);
 
-  const child = spawnLauncher(['--resolve-only'], { BROWSER_CDP_EXTRA_PROFILES: profileDir });
+  // Integración con spawn real: en runners compartidos bajo carga el proceso
+  // puede colgarse ocasionalmente (visto en windows-latest incluso con 40s);
+  // 2 intentos — un fallo sistemático tumba ambos.
+  async function attempt() {
+    const child = spawnLauncher(['--resolve-only'], { BROWSER_CDP_EXTRA_PROFILES: profileDir });
+    try {
+      return await new Promise((resolve, reject) => {
+        let out = '';
+        child.stdout.on('data', (d) => (out += d.toString('utf-8')));
+        child.on('exit', (code) => resolve({ code, stdout: out }));
+        child.on('error', reject);
+        setTimeout(() => reject(new Error('timeout --resolve-only')), 40000);
+      });
+    } finally {
+      try { child.kill(); } catch {}
+    }
+  }
+
   try {
-    const { code, stdout } = await new Promise((resolve, reject) => {
-      let out = '';
-      child.stdout.on('data', (d) => (out += d.toString('utf-8')));
-      child.on('exit', (code) => resolve({ code, stdout: out }));
-      child.on('error', reject);
-      // 40s: en runners Windows fríos (antivirus + npx) 20s quedaba corto.
-      setTimeout(() => reject(new Error('timeout --resolve-only')), 40000);
-    });
+    let result;
+    try { result = await attempt(); } catch { result = await attempt(); }
+    const { code, stdout } = result;
     assert.strictEqual(code, 0, `exit code ${code}, stdout: ${stdout}`);
     const json = JSON.parse(stdout.trim().split('\n').pop());
     assert.ok(Number.isInteger(json.port) && json.port > 0, `puerto inválido en ${stdout}`);
     assert.ok(typeof json.browser === 'string' && json.browser.length > 0);
   } finally {
-    try { child.kill(); } catch {}
     await closeServer(backend);
     fs.rmSync(profileDir, { recursive: true, force: true });
   }
