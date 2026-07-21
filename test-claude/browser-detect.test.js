@@ -91,7 +91,14 @@ test('detectExistingCDP: DevToolsActivePort del perfil apuntando a un CDP vivo â
   fs.writeFileSync(path.join(userData, 'DevToolsActivePort'), `${port}\n/devtools/browser/fake-id`);
   try {
     const browser = { name: 'fake', exe: process.execPath, userData };
-    assert.strictEqual(await detectExistingCDP(browser), port);
+    // pgrep es intermitente bajo carga (visto en macos-latest): hasta 3
+    // intentos â€” el resultado correcto en cualquiera de ellos vale.
+    let detected = null;
+    for (let i = 0; i < 3 && detected !== port; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 300));
+      detected = await detectExistingCDP(browser);
+    }
+    assert.strictEqual(detected, port);
   } finally {
     await closeServer(server);
     fs.rmSync(userData, { recursive: true, force: true });

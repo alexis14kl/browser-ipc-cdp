@@ -33,7 +33,11 @@ const MARKER_VALUE = 'browser-ipc-cdp';
 
 function probeProxy(port) {
   return new Promise((resolve) => {
-    const req = http.get({ host: PROXY_HOST, port, path: '/json/version', timeout: 700 }, (res) => {
+    // 2s: bajo inanición de CPU (runners de CI compartidos) un proxy huérfano
+    // puede tardar >700ms en responder; clasificarlo como 'other' por timeout
+    // pierde el puerto fijo. El caso puerto-libre no paga este costo (el
+    // ECONNREFUSED llega al instante).
+    const req = http.get({ host: PROXY_HOST, port, path: '/json/version', timeout: 2000 }, (res) => {
       res.resume();
       resolve(res.headers[MARKER_HEADER] === MARKER_VALUE ? 'ours' : 'other');
     });

@@ -73,7 +73,8 @@ test('--resolve-only imprime JSON con el puerto resuelto (profile fake vía env)
       child.stdout.on('data', (d) => (out += d.toString('utf-8')));
       child.on('exit', (code) => resolve({ code, stdout: out }));
       child.on('error', reject);
-      setTimeout(() => reject(new Error('timeout --resolve-only')), 20000);
+      // 40s: en runners Windows fríos (antivirus + npx) 20s quedaba corto.
+      setTimeout(() => reject(new Error('timeout --resolve-only')), 40000);
     });
     assert.strictEqual(code, 0, `exit code ${code}, stdout: ${stdout}`);
     const json = JSON.parse(stdout.trim().split('\n').pop());
