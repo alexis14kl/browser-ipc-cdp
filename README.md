@@ -245,7 +245,7 @@ Conecta con `/mcp` y tienes **67 tools** listas. Sin config extra.
 
 ---
 
-## 67 Tools — Referencia completa
+## 79 Tools — Referencia completa
 
 > `browser-ipc-cdp` expone el **CDP completo** de Chromium mas herramientas propias.
 > Cada tool trabaja sobre tu navegador **real** con tus sesiones activas.
@@ -345,6 +345,8 @@ Conecta con `/mcp` y tienes **67 tools** listas. Sin config extra.
 | `performance_stop_trace` | Detiene la traza y devuelve los datos |
 | `performance_analyze_insight` | Analiza insights de performance de la pagina |
 | `take_memory_snapshot` | Toma un snapshot del heap de memoria JavaScript |
+| `monitor_network` | Sesion CDP persistente — captura todas las requests pasivamente a traves de navegaciones. Auto-inicia en primera llamada |
+| `get_request_body` | Obtiene headers, body del request y body de la respuesta de una request especifica (por URL o requestId de `monitor_network`) |
 
 ---
 
@@ -352,8 +354,10 @@ Conecta con `/mcp` y tienes **67 tools** listas. Sin config extra.
 
 | Tool | Que hace |
 |------|----------|
-| `list_console_messages` | Lista todos los mensajes de la consola del navegador |
+| `list_console_messages` | Lista mensajes de consola (snapshot puntual via chrome-devtools-mcp) |
 | `get_console_message` | Lee un mensaje de consola especifico con detalles |
+| `monitor_console` | Sesion CDP persistente — acumula mensajes a traves de navegaciones. Auto-inicia en primera llamada |
+| `get_console_entry` | Lee una entrada especifica del buffer de `monitor_console` por indice |
 
 ---
 
@@ -405,6 +409,31 @@ Conecta con `/mcp` y tienes **67 tools** listas. Sin config extra.
 | `add_auth_header` | Inyecta `Authorization: Bearer TOKEN` en flight — sin tocar el codigo |
 | `redirect_to_local` | Redirige `https://prod.api.com/*` → `http://localhost:3000` — frontend prod vs backend local |
 | `throttle_api` | Agrega latencia artificial a un endpoint — testea loading states y skeletons |
+
+---
+
+### Seguridad y Pentesting
+
+> Tools ofensivas/defensivas que operan a nivel CDP — por debajo del sandbox JavaScript.
+> Requieren uso responsable y autorizado. Ver seccion **Uso responsable**.
+
+#### Reconocimiento (Reconnaissance)
+
+| Tool | Que hace |
+|------|----------|
+| `security_audit_headers` | Audita headers HTTP de seguridad (CSP, HSTS, X-Frame-Options, CORS). Califica cada header A-F y lista malas configuraciones |
+| `detect_third_party_scripts` | Mapea todos los scripts, iframes y estilos de terceros. Clasifica servicios conocidos (Analytics, CDN, Ads) y detecta terceros desconocidos — superficie de ataque de supply chain |
+| `analyze_network_waterfall` | Analiza el waterfall de recursos con PerformanceResourceTiming. Detecta mixed content (HTTP en HTTPS), recursos lentos, requests cross-origin y desglose de protocolo |
+| `stealth_check` | Detecta 13 senales de fingerprint de automatizacion CDP/Playwright/Puppeteer/Selenium que usan los sistemas anti-bot. Reporta riesgo de deteccion |
+
+#### Evasion y Bypass (Offensive)
+
+| Tool | Que hace |
+|------|----------|
+| `bypass_csp` | Activa/desactiva la aplicacion de CSP via `Page.setBypassCSP`. Ignora `script-src`, `connect-src` y demas directivas — permite `eval()`, scripts inline y cargas cross-origin sin restriccion |
+| `spoof_webdriver` | Parchea `navigator.webdriver` → `undefined` mediante sesion CDP persistente (CdpStealth). Sobrevive navegaciones porque el WebSocket se mantiene abierto. Verificar con `stealth_check` |
+| `extract_http_only_cookies` | Extrae cookies HttpOnly inaccesibles a JavaScript. Usa `Network.getCookies` CDP que bypasea el sandbox JS. Clasifica por rol (sesion, auth, CSRF, tracking) y exporta en formato Netscape para curl/Burp/httpx |
+| `spoof_fingerprint` | Spoofing multi-capa: UA, plataforma, vendor, idioma, pantalla, devicePixelRatio y WebGL. Presets: `mobile-android`, `mobile-ios`, `desktop-windows`, `desktop-mac`, `desktop-linux` |
 
 ---
 
