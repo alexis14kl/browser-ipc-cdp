@@ -245,7 +245,7 @@ Conecta con `/mcp` y tienes **67 tools** listas. Sin config extra.
 
 ---
 
-## 79 Tools — Referencia completa
+## 82 Tools — Referencia completa
 
 > `browser-ipc-cdp` expone el **CDP completo** de Chromium mas herramientas propias.
 > Cada tool trabaja sobre tu navegador **real** con tus sesiones activas.
@@ -434,6 +434,16 @@ Conecta con `/mcp` y tienes **67 tools** listas. Sin config extra.
 | `spoof_webdriver` | Parchea `navigator.webdriver` → `undefined` mediante sesion CDP persistente (CdpStealth). Sobrevive navegaciones porque el WebSocket se mantiene abierto. Verificar con `stealth_check` |
 | `extract_http_only_cookies` | Extrae cookies HttpOnly inaccesibles a JavaScript. Usa `Network.getCookies` CDP que bypasea el sandbox JS. Clasifica por rol (sesion, auth, CSRF, tracking) y exporta en formato Netscape para curl/Burp/httpx |
 | `spoof_fingerprint` | Spoofing multi-capa: UA, plataforma, vendor, idioma, pantalla, devicePixelRatio y WebGL. Presets: `mobile-android`, `mobile-ios`, `desktop-windows`, `desktop-mac`, `desktop-linux` |
+
+#### MitM Local y Fuzzing
+
+> Requieren uso responsable y autorizado en entornos controlados.
+
+| Tool | Que hace |
+|------|----------|
+| `network_intercept_modify` | MitM real via `Fetch.enable` + `Fetch.requestPaused`. Pausa y modifica requests/responses en vuelo: headers, body, URL, metodo, status, inyeccion de `<script>`, jsonPatch. Mas moderno que `setup_request_interception` (usa Fetch domain, no Network deprecated) |
+| `replay_request` | Replay de requests desde el contexto de la pagina (`Runtime.evaluate + fetch()`), preservando sesion viva, cookies y tokens CSRF. Soporta fuzzing con `{{PLACEHOLDER}}` en URL/body/headers |
+| `analyze_third_party_risk` | Audit de supply chain: enumera terceros, inyecta MutationObserver para detectar scripts cargados dinamicamente, analiza scripts inline buscando senales de ofuscacion (`eval`, `atob`, `fromCharCode`, hex escapes, `Function(string)`) |
 
 ---
 

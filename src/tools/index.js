@@ -24,6 +24,7 @@ const { createNetworkMonitorTools } = require('./network-monitor');
 const { createSecurityTools }       = require('./security');
 const { createCdpInterceptor }      = require('../services/cdp-interceptor');
 const { createCdpStealth }          = require('../services/cdp-stealth');
+const { createCdpFetch }            = require('../services/cdp-fetch');
 const { createCdpCoverage }         = require('../services/cdp-coverage');
 const { createCdpConsole }          = require('../services/cdp-console');
 const { createCdpNetworkMonitor }   = require('../services/cdp-network-monitor');
@@ -39,6 +40,7 @@ function createCustomTools({ browserUrl, log = () => {} }) {
   const consoleSvc      = createCdpConsole({ browserUrl, log });
   const networkMonitor  = createCdpNetworkMonitor({ browserUrl, log });
   const stealth         = createCdpStealth({ browserUrl, log });
+  const cdpFetch        = createCdpFetch({ browserUrl, log });
 
   const tools = [
     ...createCookieTools({ caller }),
@@ -55,7 +57,7 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createCoverageTools({ coverage }),
     ...createConsoleTools({ console: consoleSvc }),
     ...createNetworkMonitorTools({ networkMonitor }),
-    ...createSecurityTools({ caller, stealth }),
+    ...createSecurityTools({ caller, stealth, fetch: cdpFetch }),
   ];
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);

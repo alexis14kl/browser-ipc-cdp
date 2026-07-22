@@ -1,25 +1,23 @@
 /**
- * Security tools — análisis defensivo y reconocimiento de superficie de ataque.
+ * Security tools — análisis defensivo, reconocimiento y ofensiva local.
  *
  * Diseñados para pentesting autorizado, auditorías y red team:
- *   security_audit_headers   — análisis de cabeceras HTTP de seguridad
+ *   security_audit_headers     — análisis de cabeceras HTTP de seguridad
  *   detect_third_party_scripts — identificación de scripts de terceros / supply chain
  *   analyze_network_waterfall  — mapa de peticiones, mixed content, dominios sospechosos
- *   stealth_check             — detección de fingerprints de automatización CDP/browser
- *   bypass_csp      [OFF]    — Page.setBypassCSP(true): deshabilita todos los
- *                              Content-Security-Policy headers del sitio objetivo
- *   spoof_webdriver [OFF]    — Page.addScriptToEvaluateOnNewDocument + Runtime.evaluate
- *                              para ocultar navigator.webdriver antes de cualquier script
- *   extract_http_only_cookies — Network.getCookies bajo sandbox JS: retorna HttpOnly,
- *                              clasifica por rol, exporta formato Netscape/curl
- *   spoof_fingerprint [OFF]  — UA/platform/screen/WebGL spoof multicapa (Emulation
- *                              CDP + addScriptToEvaluateOnNewDocument). Presets device.
+ *   stealth_check              — detección de fingerprints de automatización CDP/browser
+ *   bypass_csp      [OFF]      — Page.setBypassCSP(true): deshabilita CSP del sitio
+ *   spoof_webdriver [OFF]      — ocultar navigator.webdriver vía sesión CDP persistente
+ *   extract_http_only_cookies  — Network.getCookies bajo sandbox JS: retorna HttpOnly
+ *   spoof_fingerprint [OFF]    — UA/platform/screen/WebGL spoof multicapa
  *
- * intercept_and_modify ya cubierto por tools existentes:
+ * Avanzado (Fetch domain / MitM local):
+ *   network_intercept_modify   — Fetch.enable+requestPaused: modificar req/res en vuelo
+ *   replay_request             — replay de requests con fuzzing en contexto de página
+ *   analyze_third_party_risk   — tracking dinámico + detección de ofuscación / supply chain
+ *
+ * intercept_and_modify básico ya cubierto por tools existentes:
  *   setup_request_interception, mock_api, inject_error, capture_payloads
- *
- * Nota: get_cookies (via Network.getCookies) ya expone cookies HttpOnly porque CDP
- * opera bajo la sandbox de JS — documentado en su description.
  */
 
 // ── Catálogo de cabeceras de seguridad ────────────────────────────────────────
@@ -174,7 +172,7 @@ function classifyHost(srcUrl, pageHost) {
 
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
-function createSecurityTools({ caller, stealth }) {
+function createSecurityTools({ caller, stealth, fetch: cdpFetch = null }) {
 
   // 1. security_audit_headers ─────────────────────────────────────────────────
   const securityAuditHeaders = {
@@ -931,7 +929,461 @@ function createSecurityTools({ caller, stealth }) {
     },
   };
 
-  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck, bypassCsp, spoofWebdriver, extractHttpOnlyCookies, spoofFingerprint];
+  // 9. network_intercept_modify ────────────────────────────────────────────────
+  //
+  // Fetch.enable + Fetch.requestPaused: pausa CADA request/response y permite
+  // modificar headers, body, URL, método (request stage) o inyectar scripts,
+  // parchear JSON, reemplazar body (response stage) antes de que llegue al navegador.
+  // Requiere CdpFetch (sesión persistente) para recibir los eventos async.
+
+  const networkInterceptModify = {
+    name: 'network_intercept_modify',
+    description: [
+      'Real-time Man-in-the-Middle at the browser level using Fetch.enable + Fetch.requestPaused CDP domain.',
+      'Pauses every request and/or response matching a URL pattern and applies rules before the browser processes them.',
+      'Request modifications: headers (inject/override), removeHeaders, body replacement, URL redirect, method change.',
+      'Response modifications: statusCode, headers, replaceBody (full replace), injectScript (JS injected before </body>),',
+      'injectHtml (HTML before </body>), jsonPatch (set/delete fields in JSON responses).',
+      'Actions: start (enable Fetch domain), stop (disable + clear), add_rule, remove_rule, list_rules, clear_rules.',
+      'IMPORTANT: Once started, ALL requests through the page are paused and released — adds ~10-50ms per request.',
+      'Use for: SQLi/XSS payload injection in request bodies, response manipulation, token injection, script injection MitM.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['start', 'stop', 'add_rule', 'remove_rule', 'list_rules', 'clear_rules'],
+          description: 'start/stop enable/disable Fetch interception. add_rule adds a new modification rule.',
+        },
+        urlPattern: {
+          type: 'string',
+          description: 'Glob URL pattern to match (e.g. "*.api.example.com/*", "*/login*"). Required for add_rule.',
+        },
+        stage: {
+          type: 'string',
+          enum: ['request', 'response', 'both'],
+          description: 'Which stage to intercept. "request" = before sent, "response" = after server reply, "both" = both.',
+          default: 'both',
+        },
+        requestModifications: {
+          type: 'object',
+          description: 'Modifications for request stage.',
+          properties: {
+            headers:       { type: 'object', description: 'Headers to inject/override (key:value).' },
+            removeHeaders: { type: 'array', items: { type: 'string' }, description: 'Header names to remove.' },
+            body:          { type: 'string', description: 'Replace request body (POST data).' },
+            url:           { type: 'string', description: 'Redirect request to different URL.' },
+            method:        { type: 'string', description: 'Override HTTP method.' },
+          },
+        },
+        responseModifications: {
+          type: 'object',
+          description: 'Modifications for response stage.',
+          properties: {
+            statusCode:   { type: 'number', description: 'Override HTTP status code.' },
+            headers:      { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } } }, description: 'Headers to inject/override.' },
+            replaceBody:  { type: 'string', description: 'Replace full response body with this string.' },
+            injectScript: { type: 'string', description: 'JavaScript code to inject in a <script> tag before </body>.' },
+            injectHtml:   { type: 'string', description: 'HTML to inject before </body>.' },
+            jsonPatch:    { type: 'array', description: 'Patch JSON response. Each item: {op:"set"|"delete", path:"/field", value:any}.' },
+          },
+        },
+        ruleId: {
+          type: 'string',
+          description: 'Rule ID (from add_rule result) to remove. Required for remove_rule.',
+        },
+      },
+    },
+    async handler(args) {
+      if (!cdpFetch) throw new Error('CdpFetch service not available. Ensure browser-ipc-cdp v3.9.8+.');
+
+      const { action } = args;
+
+      if (action === 'start') {
+        await cdpFetch.enable();
+        return [{ type: 'text', text: JSON.stringify({ active: true, message: 'Fetch interception enabled. Add rules with add_rule action.', rulesCount: cdpFetch.getRules().length }) }];
+      }
+
+      if (action === 'stop') {
+        await cdpFetch.disable();
+        return [{ type: 'text', text: JSON.stringify({ active: false, message: 'Fetch interception stopped. All rules cleared.' }) }];
+      }
+
+      if (action === 'list_rules') {
+        return [{ type: 'text', text: JSON.stringify({ active: cdpFetch.isActive(), rules: cdpFetch.getRules() }, null, 2) }];
+      }
+
+      if (action === 'clear_rules') {
+        cdpFetch.clearRules();
+        return [{ type: 'text', text: JSON.stringify({ message: 'All rules cleared.', active: cdpFetch.isActive() }) }];
+      }
+
+      if (action === 'remove_rule') {
+        if (!args.ruleId) throw new Error('ruleId required for remove_rule');
+        const removed = cdpFetch.removeRule(args.ruleId);
+        return [{ type: 'text', text: JSON.stringify({ removed, ruleId: args.ruleId }) }];
+      }
+
+      if (action === 'add_rule') {
+        if (!args.urlPattern) throw new Error('urlPattern required for add_rule');
+
+        if (!cdpFetch.isActive()) await cdpFetch.enable();
+
+        const id = cdpFetch.addRule({
+          urlPattern:            args.urlPattern,
+          stage:                 args.stage || 'both',
+          requestModifications:  args.requestModifications  || null,
+          responseModifications: args.responseModifications || null,
+        });
+
+        return [{ type: 'text', text: JSON.stringify({
+          ruleId:      id,
+          urlPattern:  args.urlPattern,
+          stage:       args.stage || 'both',
+          requestMods: args.requestModifications  || null,
+          responseMods: args.responseModifications || null,
+          allRules:    cdpFetch.getRules().length,
+          note: 'Rule active. Use list_rules to inspect, remove_rule to delete.',
+        }, null, 2) }];
+      }
+
+      throw new Error(`Unknown action: ${action}`);
+    },
+  };
+
+  // 10. replay_request ──────────────────────────────────────────────────────────
+  //
+  // Ejecuta fetch() en el contexto de la página (Runtime.evaluate + awaitPromise).
+  // Al correr dentro del navegador: mantiene sesión activa, cookies, tokens CSRF,
+  // y cualquier header que el site inyecte. Soporta fuzzing con {{PLACEHOLDER}}.
+
+  const replayRequest = {
+    name: 'replay_request',
+    description: [
+      'Replay an HTTP request from inside the browser page context (Runtime.evaluate + fetch()), preserving live session,',
+      'cookies, auth tokens, and any headers the site injects automatically.',
+      'Supports fuzzing: use {{PLACEHOLDER}} in url/body/headers, then pass fuzz:{PLACEHOLDER: ["val1","val2",...]}.',
+      'Each iteration substitutes the nth value of each placeholder list.',
+      'Returns status, response headers and body (truncated to 8k) for each iteration.',
+      'Use for: auth bypass testing, SQLi/XSS parameter fuzzing, CSRF token replay, API brute-force with real session.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      required: ['url'],
+      properties: {
+        url:        { type: 'string', description: 'Target URL. Supports {{PLACEHOLDER}} tokens.' },
+        method:     { type: 'string', default: 'GET', description: 'HTTP method.' },
+        headers:    { type: 'object', description: 'Extra headers to send (key:value). Supports {{PLACEHOLDER}} in values.' },
+        body:       { type: 'string', description: 'Request body. Supports {{PLACEHOLDER}} tokens.' },
+        fuzz:       { type: 'object', description: 'Map of placeholder→values[]. E.g. {"USER":["admin","root"],"PASS":["123","admin"]}.' },
+        iterations: { type: 'number', default: 1, description: 'Number of iterations. If fuzz provided, defaults to max fuzz list length.' },
+        bodyLimit:  { type: 'number', default: 8000, description: 'Max response body chars to return per iteration.' },
+      },
+    },
+    async handler(args) {
+      const method    = (args.method || 'GET').toUpperCase();
+      const fuzz      = args.fuzz || {};
+      const fuzzKeys  = Object.keys(fuzz);
+      const maxLen    = fuzzKeys.length > 0 ? Math.max(...fuzzKeys.map(k => fuzz[k].length)) : 1;
+      const iterations = args.iterations || maxLen;
+      const limit     = args.bodyLimit || 8000;
+
+      function substitute(str, idx) {
+        if (!str) return str;
+        let result = str;
+        for (const key of fuzzKeys) {
+          const vals = fuzz[key];
+          const val  = String(vals[idx % vals.length]);
+          result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), val);
+        }
+        return result;
+      }
+
+      const results = [];
+
+      for (let i = 0; i < iterations; i++) {
+        const url     = substitute(args.url, i);
+        const body    = args.body ? substitute(args.body, i) : undefined;
+        const headers = {};
+        if (args.headers) {
+          for (const [k, v] of Object.entries(args.headers)) {
+            headers[k] = substitute(v, i);
+          }
+        }
+
+        const fetchOpts = {
+          method,
+          headers,
+          credentials: 'include',
+          ...(body !== undefined ? { body } : {}),
+        };
+
+        const expression = `
+          (async () => {
+            try {
+              const res = await fetch(${JSON.stringify(url)}, ${JSON.stringify(fetchOpts)});
+              const text = await res.text();
+              return {
+                ok:         res.ok,
+                status:     res.status,
+                statusText: res.statusText,
+                headers:    Object.fromEntries(res.headers.entries()),
+                body:       text.substring(0, ${limit}),
+                bodyLength: text.length,
+              };
+            } catch (e) {
+              return { error: e.message };
+            }
+          })()
+        `;
+
+        const evalResult = await caller.call('Runtime.evaluate', {
+          expression,
+          awaitPromise:  true,
+          returnByValue: true,
+        });
+
+        results.push({
+          iteration: i + 1,
+          substitutions: fuzzKeys.length > 0
+            ? Object.fromEntries(fuzzKeys.map(k => [k, fuzz[k][i % fuzz[k].length]]))
+            : null,
+          url,
+          response: evalResult?.result?.value || { error: 'evaluate failed' },
+        });
+      }
+
+      return [{ type: 'text', text: JSON.stringify({
+        iterations: results.length,
+        method,
+        results,
+      }, null, 2) }];
+    },
+  };
+
+  // 11. analyze_third_party_risk ────────────────────────────────────────────────
+  //
+  // Supply chain attack surface: enumera todos los recursos de terceros, inyecta
+  // MutationObserver para capturar scripts cargados dinámicamente, y analiza
+  // scripts inline buscando señales de ofuscación (eval, atob, fromCharCode, etc.)
+
+  const KNOWN_RISKY_PATTERNS = [
+    { pattern: /\.tk$|\.ml$|\.ga$|\.cf$|\.gq$/i,       risk: 'high',   reason: 'Free TLD — común en dominios maliciosos' },
+    { pattern: /[0-9]{1,3}-[0-9]{1,3}-[0-9]{1,3}/,     risk: 'medium', reason: 'Dominio con IP-like string' },
+    { pattern: /cdn\d+\.|assets\d+\.|static\d+\./i,     risk: 'low',    reason: 'CDN genérico sin marca reconocida' },
+    { pattern: /pastebin\.com|paste\.ee|hastebin/i,      risk: 'critical', reason: 'Paste site — carga de payloads conocida' },
+    { pattern: /ngrok\.io|serveo\.net|localhost\.run/i,  risk: 'critical', reason: 'Túnel público — posible C2' },
+  ];
+
+  const OBFUSCATION_SIGNALS = [
+    { rx: /eval\s*\(/g,                    label: 'eval()',           weight: 3 },
+    { rx: /atob\s*\(/g,                    label: 'atob()',           weight: 3 },
+    { rx: /String\.fromCharCode\s*\(/g,    label: 'fromCharCode()',   weight: 3 },
+    { rx: /\\x[0-9a-f]{2}/gi,             label: 'hex escape \\xNN', weight: 2 },
+    { rx: /Function\s*\(\s*['"`]/g,        label: 'Function(string)', weight: 4 },
+    { rx: /document\.write\s*\(/g,         label: 'document.write()', weight: 2 },
+    { rx: /unescape\s*\(/g,               label: 'unescape()',        weight: 2 },
+    { rx: /setTimeout\s*\(\s*['"`]/g,      label: 'setTimeout(str)',  weight: 3 },
+    { rx: /\bwindow\['[^']{1,40}'\]\s*\(/, label: 'window["fn"]()',   weight: 2 },
+    { rx: /;[^\s]{200}/,                   label: 'minified (>200 chars no space)', weight: 1 },
+  ];
+
+  const analyzeThirdPartyRisk = {
+    name: 'analyze_third_party_risk',
+    description: [
+      'Advanced supply chain attack surface analysis. Enumerates all third-party resources (scripts, iframes, stylesheets,',
+      'XHR/fetch calls), injects a MutationObserver to catch dynamically loaded scripts/iframes during waitMs,',
+      'and analyzes inline scripts for obfuscation signals (eval, atob, String.fromCharCode, hex escapes,',
+      'Function(string), document.write, etc.). Scores each inline script 0-100 for obfuscation likelihood.',
+      'Classifies third-party domains by risk level using URL pattern heuristics.',
+      'Use for: supply chain audits, detecting malicious script injection, identifying unknown third parties,',
+      'finding dynamic script loaders that bypass CSP reports.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        waitMs: {
+          type: 'number',
+          default: 2000,
+          description: 'Milliseconds to observe dynamic DOM mutations. Higher = catches lazy-loaded scripts.',
+        },
+        checkObfuscation: {
+          type: 'boolean',
+          default: true,
+          description: 'Analyze inline scripts for obfuscation patterns.',
+        },
+      },
+    },
+    async handler(args) {
+      const waitMs           = args.waitMs !== undefined ? args.waitMs : 2000;
+      const checkObfuscation = args.checkObfuscation !== false;
+
+      // Step 1: current page origin
+      const originResult = await caller.call('Runtime.evaluate', {
+        expression: 'location.origin',
+        returnByValue: true,
+      });
+      const pageOrigin = originResult?.result?.value || '';
+      let pageHost = '';
+      try { pageHost = new URL(pageOrigin).hostname; } catch (_) {}
+
+      // Step 2: inject MutationObserver + collect static resources
+      const injectExpr = `
+        (function() {
+          window.__tpRisk = window.__tpRisk || { dynamic: [], started: Date.now() };
+          const obs = new MutationObserver(mutations => {
+            for (const m of mutations) {
+              for (const n of m.addedNodes) {
+                if (!n.tagName) continue;
+                const tag = n.tagName.toLowerCase();
+                if ((tag === 'script' || tag === 'iframe' || tag === 'link') && (n.src || n.href)) {
+                  window.__tpRisk.dynamic.push({ tag, url: n.src || n.href, time: Date.now() - window.__tpRisk.started });
+                }
+              }
+            }
+          });
+          obs.observe(document.documentElement, { childList: true, subtree: true });
+          window.__tpRiskObserver = obs;
+
+          // Collect static resources from Performance API
+          const resources = performance.getEntriesByType('resource').map(r => ({
+            url:           r.name,
+            type:          r.initiatorType,
+            duration:      Math.round(r.duration),
+            size:          r.transferSize || 0,
+            crossOrigin:   !r.name.startsWith(location.origin),
+          }));
+
+          // Inline scripts
+          const inlineScripts = [...document.querySelectorAll('script:not([src])')].map(s => ({
+            length: s.textContent.length,
+            content: s.textContent.substring(0, 2000),
+          })).filter(s => s.length > 10);
+
+          // External scripts
+          const externalScripts = [...document.querySelectorAll('script[src]')].map(s => s.src);
+          const externalIframes  = [...document.querySelectorAll('iframe[src]')].map(f => f.src);
+
+          return { resources, inlineScripts, externalScripts, externalIframes };
+        })()
+      `;
+
+      const staticResult = await caller.call('Runtime.evaluate', {
+        expression: injectExpr,
+        returnByValue: true,
+      });
+      const staticData = staticResult?.result?.value || {};
+
+      // Step 3: wait for dynamic mutations
+      if (waitMs > 0) {
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+
+      // Step 4: collect dynamic mutations + stop observer
+      const dynamicResult = await caller.call('Runtime.evaluate', {
+        expression: `(function() {
+          if (window.__tpRiskObserver) { window.__tpRiskObserver.disconnect(); delete window.__tpRiskObserver; }
+          const d = (window.__tpRisk || {}).dynamic || [];
+          delete window.__tpRisk;
+          return d;
+        })()`,
+        returnByValue: true,
+      });
+      const dynamicResources = dynamicResult?.result?.value || [];
+
+      // Step 5: analyze domains
+      function getDomain(url) {
+        try { return new URL(url).hostname; } catch (_) { return url; }
+      }
+
+      function assessDomain(domain) {
+        for (const { pattern, risk, reason } of KNOWN_RISKY_PATTERNS) {
+          if (pattern.test(domain)) return { risk, reason };
+        }
+        return { risk: 'unknown', reason: 'Not in known risk list' };
+      }
+
+      const allUrls = [
+        ...((staticData.resources || []).filter(r => r.crossOrigin).map(r => ({ url: r.url, type: r.type, source: 'performance' }))),
+        ...((staticData.externalScripts || []).map(u => ({ url: u, type: 'script', source: 'dom' }))),
+        ...((staticData.externalIframes  || []).map(u => ({ url: u, type: 'iframe', source: 'dom'  }))),
+        ...(dynamicResources.map(r => ({ url: r.url, type: r.tag, source: 'dynamic', msAfterLoad: r.time }))),
+      ];
+
+      const domainMap = new Map();
+      for (const item of allUrls) {
+        const domain = getDomain(item.url);
+        if (!domain || domain === pageHost) continue;
+        if (!domainMap.has(domain)) {
+          const assessment = assessDomain(domain);
+          domainMap.set(domain, {
+            domain,
+            risk:        assessment.risk,
+            riskReason:  assessment.reason,
+            resources:   [],
+            dynamicLoad: false,
+          });
+        }
+        const entry = domainMap.get(domain);
+        entry.resources.push({ url: item.url.substring(0, 200), type: item.type, source: item.source });
+        if (item.source === 'dynamic') entry.dynamicLoad = true;
+      }
+
+      const thirdParties = [...domainMap.values()].sort((a, b) => {
+        const order = { critical: 0, high: 1, medium: 2, low: 3, unknown: 4 };
+        return (order[a.risk] || 4) - (order[b.risk] || 4);
+      });
+
+      // Step 6: obfuscation analysis on inline scripts
+      let obfuscationReport = null;
+      if (checkObfuscation) {
+        const inlineScripts = staticData.inlineScripts || [];
+        obfuscationReport = inlineScripts.map((script, idx) => {
+          const hits = [];
+          let score  = 0;
+          for (const sig of OBFUSCATION_SIGNALS) {
+            const matches = (script.content.match(sig.rx) || []).length;
+            if (matches > 0) {
+              hits.push({ signal: sig.label, count: matches });
+              score += sig.weight * matches;
+            }
+          }
+          return {
+            scriptIndex:    idx,
+            scriptLength:   script.length,
+            obfuscationScore: Math.min(score * 5, 100),
+            signals:        hits,
+            verdict:        score >= 8 ? 'LIKELY_OBFUSCATED' : score >= 4 ? 'SUSPICIOUS' : 'CLEAN',
+          };
+        }).filter(r => r.signals.length > 0);
+      }
+
+      const summary = {
+        pageHost,
+        thirdPartyDomains: thirdParties.length,
+        criticalDomains:   thirdParties.filter(d => d.risk === 'critical').length,
+        highRiskDomains:   thirdParties.filter(d => d.risk === 'high').length,
+        dynamicLoaders:    thirdParties.filter(d => d.dynamicLoad).length,
+        obfuscatedScripts: obfuscationReport ? obfuscationReport.filter(r => r.verdict !== 'CLEAN').length : null,
+      };
+
+      return [{ type: 'text', text: JSON.stringify({
+        summary,
+        thirdParties,
+        obfuscationReport,
+        dynamicResourcesObserved: dynamicResources.length,
+        observationWindowMs: waitMs,
+      }, null, 2) }];
+    },
+  };
+
+  return [
+    securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall,
+    stealthCheck, bypassCsp, spoofWebdriver, extractHttpOnlyCookies, spoofFingerprint,
+    networkInterceptModify, replayRequest, analyzeThirdPartyRisk,
+  ];
 }
 
 module.exports = { createSecurityTools };
