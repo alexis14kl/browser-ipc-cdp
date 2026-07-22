@@ -241,16 +241,192 @@ Tambien puedes hacerlo a mano en `.mcp.json`:
 
 ### 4. Usar desde Claude Code
 
+Conecta con `/mcp` y tienes **60 tools** listas. Sin config extra.
+
+---
+
+## 60 Tools — Referencia completa
+
+> `browser-ipc-cdp` expone el **CDP completo** de Chromium mas herramientas propias.
+> Cada tool trabaja sobre tu navegador **real** con tus sesiones activas.
+
+---
+
+### Navegacion y Paginas
+
+| Tool | Que hace |
+|------|----------|
+| `navigate_page` | Navega a una URL, recarga, avanza o retrocede |
+| `list_pages` | Lista todas las pestanas abiertas con URL y titulo |
+| `new_page` | Abre una nueva pestana |
+| `close_page` | Cierra una pestana |
+| `select_page` | Cambia el foco a una pestana especifica |
+| `resize_page` | Cambia el tamano del viewport |
+| `wait_for` | Espera a que aparezca un texto en la pagina |
+
+---
+
+### Vision — Screenshots y Snapshots
+
+| Tool | Que hace |
+|------|----------|
+| `take_screenshot` | Captura el viewport o pagina completa (PNG/JPEG/WebP) |
+| `take_snapshot` | Lee el contenido accesible de la pagina (para que la IA entienda la UI) |
+| `print_to_pdf` | Exporta la pagina actual a un archivo PDF |
+
+---
+
+### Interaccion con la UI
+
+| Tool | Que hace |
+|------|----------|
+| `click` | Hace click en un elemento por UID |
+| `hover` | Mueve el mouse sobre un elemento |
+| `drag` | Arrastra un elemento de origen a destino |
+| `fill` | Escribe en un campo de texto |
+| `fill_form` | Rellena multiples campos de un formulario de una vez |
+| `type_text` | Escribe texto caracter por caracter (simula teclado real) |
+| `press_key` | Presiona una tecla (Enter, Tab, Escape, flechas, etc.) |
+| `upload_file` | Sube un archivo via input[type=file] |
+| `handle_dialog` | Acepta o rechaza dialogs (alert, confirm, prompt) |
+| `emulate` | Emula dispositivos moviles (iPhone, Android, viewport, user-agent) |
+
+---
+
+### JavaScript y DOM
+
+| Tool | Que hace |
+|------|----------|
+| `evaluate_script` | Ejecuta JavaScript arbitrario en la pagina |
+| `get_dom_element` | Busca elementos por selector CSS — devuelve atributos, textContent y HTML |
+| `get_frames` | Lista todos los iframes del documento con su URL y jerarquia |
+| `evaluate_in_frame` | Ejecuta JavaScript dentro de un iframe especifico |
+| `get_accessibility_tree` | Devuelve el arbol de accesibilidad filtrado por rol e importancia |
+
+---
+
+### Storage del navegador
+
+| Tool | Que hace |
+|------|----------|
+| `get_local_storage` | Lee todo el localStorage o una clave especifica |
+| `set_local_storage` | Escribe un valor en localStorage |
+| `get_session_storage` | Lee todo el sessionStorage o una clave especifica |
+| `set_session_storage` | Escribe un valor en sessionStorage |
+| `clear_storage` | Limpia localStorage, sessionStorage o ambos |
+| `list_indexed_db` | Lista todas las bases IndexedDB y sus object stores |
+| `get_indexed_db_data` | Lee registros de un object store con paginacion |
+
+---
+
+### Cookies
+
+| Tool | Que hace |
+|------|----------|
+| `get_cookies` | Lee las cookies de la pagina actual (todas o por nombre/dominio) |
+| `set_cookie` | Crea o actualiza una cookie con todos sus atributos |
+| `delete_cookies` | Elimina cookies por nombre, dominio o URL |
+
+---
+
+### Red y Performance
+
+| Tool | Que hace |
+|------|----------|
+| `list_network_requests` | Lista todas las requests de red capturadas |
+| `get_network_request` | Detalla headers, body y timing de una request especifica |
+| `emulate_network` | Simula condiciones de red: offline, 2G, 3G, 4G o custom |
+| `block_urls` | Bloquea requests que coincidan con patrones de URL |
+| `lighthouse_audit` | Ejecuta una auditoria Lighthouse (performance, SEO, accesibilidad) |
+| `performance_start_trace` | Inicia una traza de performance CDP |
+| `performance_stop_trace` | Detiene la traza y devuelve los datos |
+| `performance_analyze_insight` | Analiza insights de performance de la pagina |
+| `take_memory_snapshot` | Toma un snapshot del heap de memoria JavaScript |
+
+---
+
+### Consola y Debug
+
+| Tool | Que hace |
+|------|----------|
+| `list_console_messages` | Lista todos los mensajes de la consola del navegador |
+| `get_console_message` | Lee un mensaje de consola especifico con detalles |
+
+---
+
+### Emulacion del entorno
+
+| Tool | Que hace |
+|------|----------|
+| `set_geolocation` | Sobreescribe la ubicacion GPS del navegador |
+| `grant_permissions` | Otorga permisos sin popup (camara, mic, notificaciones, geolocalizacion) |
+| `set_download_path` | Controla donde se guardan los archivos descargados |
+| `ignore_cert_errors` | Ignora errores de certificado HTTPS (certs autofirmados) |
+
+---
+
+### Intercepcion de requests
+
+| Tool | Que hace |
+|------|----------|
+| `setup_request_interception` | Activa reglas de intercepcion con acciones: `mock`, `block`, `redirect`, `delay`, `pass`, `add_headers` |
+| `get_intercepted_requests` | Lee todas las requests capturadas con URL, metodo y payload |
+| `clear_request_interception` | Detiene la intercepcion y elimina todas las reglas |
+
+---
+
+### Advanced Testing Tools — Para QA de alto nivel
+
+> Estas tools son atajos semanticos sobre el sistema de intercepcion.
+> Diseñadas para testers avanzados que necesitan velocidad y precision.
+
+| Tool | Caso de uso |
+|------|-------------|
+| `mock_api` | Responde un endpoint con JSON sintetico — testea UI sin backend real |
+| `block_resources` | Bloquea imagenes / ads / analytics / fonts / scripts por categoria |
+| `inject_error` | Fuerza un HTTP 500/404/401 en un endpoint — chaos testing |
+| `capture_payloads` | Captura el body de los POST sin alterar el request — debug de formularios |
+| `add_auth_header` | Inyecta `Authorization: Bearer TOKEN` en flight — sin tocar el codigo |
+| `redirect_to_local` | Redirige `https://prod.api.com/*` → `http://localhost:3000` — frontend prod vs backend local |
+| `throttle_api` | Agrega latencia artificial a un endpoint — testea loading states y skeletons |
+
+---
+
+### Ejemplos rapidos
+
 ```
-mcp__brave__list_pages          → Ver pestanas abiertas
-mcp__brave__navigate_page       → Navegar a URL
-mcp__brave__take_snapshot       → Leer contenido de la pagina
-mcp__brave__take_screenshot     → Captura de pantalla
-mcp__brave__click               → Click en elemento
-mcp__brave__fill                → Escribir en campo de texto
-mcp__brave__press_key           → Presionar tecla
-mcp__brave__evaluate_script     → Ejecutar JavaScript
-mcp__brave__list_network_requests → Ver requests de red
+# Ver que tabs hay abiertas
+mcp__brave__list_pages
+
+# Ir a Google con tu sesion real
+mcp__brave__navigate_page { url: "https://google.com" }
+
+# Screenshot del estado actual
+mcp__brave__take_screenshot
+
+# Mockear una API para testear sin backend
+mcp__brave__mock_api {
+  urlPattern: "*/api/users*",
+  responseBody: [{ id: 1, name: "Test User" }]
+}
+
+# Bloquear todo el tracking y ads
+mcp__brave__block_resources { categories: ["analytics", "ads"] }
+
+# Testear como responde tu UI a un error 500
+mcp__brave__inject_error { urlPattern: "*/api/checkout*", statusCode: 500 }
+
+# Simular conexion 3G
+mcp__brave__emulate_network { preset: "3g" }
+
+# Exportar la pagina a PDF
+mcp__brave__print_to_pdf { path: "C:/output/reporte.pdf" }
+
+# Ver el localStorage de la app
+mcp__brave__get_local_storage
+
+# Leer el arbol de accesibilidad
+mcp__brave__get_accessibility_tree { depth: 3 }
 ```
 
 ---
