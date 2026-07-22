@@ -12,3 +12,6 @@ __pycache__/
 browser_config.json
 cdp_info.json
 node_modules/
+
+# Claude Code local config — nunca al repo público
+.claude/
