@@ -6,30 +6,36 @@
  * mcp-controller.run), por eso la factory llega como parámetro al controller.
  */
 
-const { createCdpCaller }         = require('./_cdp-caller');
-const { createCookieTools }       = require('./cookies');
-const { createPdfTools }          = require('./pdf');
-const { createFrameTools }        = require('./frames');
-const { createStorageTools }      = require('./storage');
-const { createNetworkTools }      = require('./network');
-const { createEmulationTools }    = require('./emulation');
-const { createAccessibilityTools }= require('./accessibility');
-const { createDomTools }          = require('./dom');
-const { createIndexedDbTools }    = require('./indexed-db');
-const { createInterceptTools }    = require('./intercept');
-const { createAdvancedTools }     = require('./advanced');
-const { createCoverageTools }     = require('./coverage');
-const { createCdpInterceptor }    = require('../services/cdp-interceptor');
-const { createCdpCoverage }       = require('../services/cdp-coverage');
+const { createCdpCaller }           = require('./_cdp-caller');
+const { createCookieTools }         = require('./cookies');
+const { createPdfTools }            = require('./pdf');
+const { createFrameTools }          = require('./frames');
+const { createStorageTools }        = require('./storage');
+const { createNetworkTools }        = require('./network');
+const { createEmulationTools }      = require('./emulation');
+const { createAccessibilityTools }  = require('./accessibility');
+const { createDomTools }            = require('./dom');
+const { createIndexedDbTools }      = require('./indexed-db');
+const { createInterceptTools }      = require('./intercept');
+const { createAdvancedTools }       = require('./advanced');
+const { createCoverageTools }       = require('./coverage');
+const { createConsoleTools }        = require('./console');
+const { createNetworkMonitorTools } = require('./network-monitor');
+const { createCdpInterceptor }      = require('../services/cdp-interceptor');
+const { createCdpCoverage }         = require('../services/cdp-coverage');
+const { createCdpConsole }          = require('../services/cdp-console');
+const { createCdpNetworkMonitor }   = require('../services/cdp-network-monitor');
 
 /**
  * @param {{ browserUrl: string, log?: (msg: string) => void }} opts
  * @returns {Array<{ name, description, inputSchema, handler }>}
  */
 function createCustomTools({ browserUrl, log = () => {} }) {
-  const caller      = createCdpCaller({ browserUrl });
-  const interceptor = createCdpInterceptor({ browserUrl, log });
-  const coverage    = createCdpCoverage({ browserUrl, log });
+  const caller          = createCdpCaller({ browserUrl });
+  const interceptor     = createCdpInterceptor({ browserUrl, log });
+  const coverage        = createCdpCoverage({ browserUrl, log });
+  const consoleSvc      = createCdpConsole({ browserUrl, log });
+  const networkMonitor  = createCdpNetworkMonitor({ browserUrl, log });
 
   const tools = [
     ...createCookieTools({ caller }),
@@ -44,6 +50,8 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createInterceptTools({ interceptor }),
     ...createAdvancedTools({ interceptor }),
     ...createCoverageTools({ coverage }),
+    ...createConsoleTools({ console: consoleSvc }),
+    ...createNetworkMonitorTools({ networkMonitor }),
   ];
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);
