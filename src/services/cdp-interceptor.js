@@ -67,10 +67,12 @@ function createCdpInterceptor({ browserUrl, log = () => {} }) {
     const rule = matchRule(event);
 
     _captured.push({
-      url:    event.request.url,
-      method: event.request.method,
-      rule:   rule?.name  ?? null,
-      action: rule?.action ?? 'pass',
+      url:      event.request.url,
+      method:   event.request.method,
+      postData: event.request.postData ?? null,
+      headers:  event.request.headers  ?? null,
+      rule:     rule?.name  ?? null,
+      action:   rule?.action ?? 'pass',
     });
 
     try {
@@ -121,6 +123,15 @@ function createCdpInterceptor({ browserUrl, log = () => {} }) {
       if (rule.action === 'delay') {
         await new Promise(r => setTimeout(r, rule.delayMs ?? 1000));
         await session.send('Fetch.continueRequest', { requestId: event.requestId });
+        return;
+      }
+
+      if (rule.action === 'add_headers') {
+        const existing = Object.entries(event.request.headers || {}).map(([name, value]) => ({ name, value }));
+        const extra    = rule.headers ?? [];
+        const extraNames = new Set(extra.map(h => h.name.toLowerCase()));
+        const merged   = [...existing.filter(h => !extraNames.has(h.name.toLowerCase())), ...extra];
+        await session.send('Fetch.continueRequest', { requestId: event.requestId, headers: merged });
         return;
       }
 
