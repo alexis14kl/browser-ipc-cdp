@@ -1,14 +1,16 @@
 /**
  * Tools de consola del navegador via CdpConsole (servicio inyectado).
  *
+ * Nombres distintos a chrome-devtools-mcp (list_console_messages / get_console_message)
+ * para evitar conflicto de nombres en el registro de tools.
+ *
  * Auto-inicia la captura en el primer uso.
- * No duplica nada de network.js ni intercept.js.
  */
 
 function createConsoleTools({ console: consoleSvc }) {
-  const listConsoleMessages = {
-    name: 'list_console_messages',
-    description: 'List browser console messages (log, warn, error, info, debug, verbose). Auto-starts capture if not active. Returns last N messages matching the optional filters.',
+  const monitorConsole = {
+    name: 'monitor_console',
+    description: 'List browser console messages captured via persistent CDP session (log, warn, error, info, debug). Distinct from list_console_messages — this uses a live WebSocket session and accumulates across navigations. Auto-starts on first call.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -41,9 +43,9 @@ function createConsoleTools({ console: consoleSvc }) {
     },
   };
 
-  const getConsoleMessage = {
-    name: 'get_console_message',
-    description: 'Get a specific console message by index from the captured list (use list_console_messages first).',
+  const getConsoleEntry = {
+    name: 'get_console_entry',
+    description: 'Get a specific console message by index from the monitor_console buffer.',
     inputSchema: {
       type: 'object',
       required: ['index'],
@@ -65,7 +67,7 @@ function createConsoleTools({ console: consoleSvc }) {
     },
   };
 
-  return [listConsoleMessages, getConsoleMessage];
+  return [monitorConsole, getConsoleEntry];
 }
 
 module.exports = { createConsoleTools };

@@ -1,14 +1,17 @@
 /**
  * Tools de monitoreo pasivo de red via CdpNetworkMonitor (servicio inyectado).
  *
- * Complementa (no duplica) network.js que maneja condiciones/bloqueos/caché.
+ * Nombres distintos a chrome-devtools-mcp (list_network_requests / get_network_request)
+ * para evitar conflicto de nombres en el registro de tools.
+ *
+ * Complementa network.js (condiciones/bloqueos/caché).
  * Estos tools OBSERVAN el tráfico sin modificarlo.
  */
 
 function createNetworkMonitorTools({ networkMonitor }) {
-  const listNetworkRequests = {
-    name: 'list_network_requests',
-    description: 'List all captured network requests (passive observation, no interception). Shows URL, method, HTTP status, resource type, size and duration. Auto-starts monitoring if not active.',
+  const monitorNetwork = {
+    name: 'monitor_network',
+    description: 'List all captured network requests via persistent CDP session (passive, no interception). Distinct from list_network_requests — accumulates across navigations. Shows URL, method, status, type, size, duration. Auto-starts on first call.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -49,7 +52,6 @@ function createNetworkMonitorTools({ networkMonitor }) {
         limit:  args.limit,
       });
 
-      // summary sin headers/body para mantener output compacto
       const summary = requests.map(r => ({
         requestId: r.requestId,
         method:    r.method,
@@ -71,9 +73,9 @@ function createNetworkMonitorTools({ networkMonitor }) {
     },
   };
 
-  const getNetworkRequest = {
-    name: 'get_network_request',
-    description: 'Get full details of a specific network request including request/response headers, POST body and response body. Pass a URL substring or the requestId from list_network_requests.',
+  const getRequestBody = {
+    name: 'get_request_body',
+    description: 'Get full details of a specific network request including request/response headers, POST body and response body. Pass a URL substring or the requestId from monitor_network.',
     inputSchema: {
       type: 'object',
       required: ['urlOrId'],
@@ -94,7 +96,7 @@ function createNetworkMonitorTools({ networkMonitor }) {
     },
   };
 
-  return [listNetworkRequests, getNetworkRequest];
+  return [monitorNetwork, getRequestBody];
 }
 
 module.exports = { createNetworkMonitorTools };
