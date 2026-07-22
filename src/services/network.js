@@ -9,6 +9,26 @@ const IS_WSL = PLATFORM_ID === 'wsl';
 const FIREWALL_RULE = 'CDP All Ports (IPC)';
 
 /**
+ * ¿Hay que montar el reenvío de red (firewall + portproxy)?
+ * Solo cuando el consumidor del MCP (Claude Code) corre dentro de WSL y debe
+ * alcanzar el navegador que escucha en 127.0.0.1 del host Windows:
+ *   - CLI dentro de WSL      → sí (consumidor WSL).
+ *   - CLI en Windows nativo  → no, salvo opt-in explícito
+ *     BROWSER_IPC_CDP_TARGET=wsl (caso "npx desde Windows pero Claude Code
+ *     vive en WSL").
+ * En Windows nativo con consumidor nativo la conexión es loopback y no se toca
+ * ni el firewall ni el portproxy. El comportamiento en WSL queda idéntico al
+ * actual (incluida la elevación de permisos).
+ */
+function needsForwarding() {
+  if (IS_WSL) return true;
+  if (IS_WIN && String(process.env.BROWSER_IPC_CDP_TARGET || '').toLowerCase() === 'wsl') {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Ejecuta netsh con permisos elevados usando Python ctypes.
  * Python puede usar ctypes.windll.shell32.ShellExecuteW para elevar sin .bat
  * O si ya tiene permisos, ejecuta directo.
@@ -55,7 +75,7 @@ sys.exit(1)
 }
 
 function setupFirewall() {
-  if (!IS_WIN && !IS_WSL) return true;
+  if (!needsForwarding()) return true;
 
   // Verificar si ya existe
   try {
@@ -87,7 +107,7 @@ function setupFirewall() {
 }
 
 function setupPortproxy(port) {
-  if (!IS_WIN && !IS_WSL) return true;
+  if (!needsForwarding()) return true;
 
   // Verificar si ya existe
   try {
