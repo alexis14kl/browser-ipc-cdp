@@ -174,7 +174,7 @@ function classifyHost(srcUrl, pageHost) {
 
 // ── Tools ─────────────────────────────────────────────────────────────────────
 
-function createSecurityTools({ caller }) {
+function createSecurityTools({ caller, stealth }) {
 
   // 1. security_audit_headers ─────────────────────────────────────────────────
   const securityAuditHeaders = {
@@ -546,40 +546,22 @@ function createSecurityTools({ caller }) {
 
   // 6. spoof_webdriver ────────────────────────────────────────────────────────
   //
-  // Two-layer approach required:
-  //   Layer A — Page.addScriptToEvaluateOnNewDocument: runs BEFORE any page
-  //             script on every future navigation. This is the only reliable
-  //             way to hide webdriver from anti-bot checks that run at parse
-  //             time (before Runtime.evaluate can fire).
-  //   Layer B — Runtime.evaluate on the current document: patches the already-
-  //             loaded page immediately without waiting for a reload.
+  // Root cause (confirmed): CdpCaller closes the WebSocket after each call.
+  // Chrome ties addScriptToEvaluateOnNewDocument scripts to the DevTools SESSION
+  // — when the socket closes Chrome removes the scripts. After navigation to a
+  // new document they never run.
   //
-  // The patch itself uses a fallback chain because navigator.webdriver is
-  // non-configurable on CDP-attached sessions in some Chrome builds:
-  //   1. Object.defineProperty (fastest, cleanest)
-  //   2. delete + redefine (works if property is deletable)
-  //   3. Proxy on window.navigator (last resort, slightly detectable)
-  //
-  // scriptId stored in closure so enabled=false can remove the exact script
-  // that was registered without touching scripts added by other tools.
-  let spoofScriptId = null;
+  // Fix: CdpStealth (persistent session injected via stealth param):
+  //   A) Keeps the WS open → Chrome preserves addScriptToEvaluateOnNewDocument
+  //   B) Subscribes Page.frameNavigated → re-applies patch via Runtime.evaluate
+  //      immediately after each nav for zero-gap coverage
 
-  // Chrome injects navigator.webdriver on Navigator.prototype AFTER
-  // addScriptToEvaluateOnNewDocument scripts run (confirmed by property descriptor
-  // inspection: protoDesc.get = "[native code]", configurable: true post-nav).
-  //
-  // Strategy: define our getter with configurable: FALSE so Chrome's re-injection
-  // attempt (Object.defineProperty on a non-configurable property) throws TypeError
-  // internally — Chrome catches it and gives up, leaving our undefined getter.
-  //
-  // If configurable:false fails (some Brave builds throw on delete), fall back to
-  // defining an own property on the navigator INSTANCE (overrides prototype lookup).
   const WEBDRIVER_PATCH = `
     (function() {
       try {
         const proto = Navigator.prototype || navigator.__proto__;
         delete proto.webdriver;
-        // configurable: false — blocks Chrome from redefining after us
+        // configurable: false blocks Chrome's re-injection attempt
         Object.defineProperty(proto, 'webdriver', {
           get: () => undefined,
           configurable: false,
@@ -587,14 +569,12 @@ function createSecurityTools({ caller }) {
         });
       } catch (_) {
         try {
-          // Fallback: own property on instance overrides prototype lookup
           Object.defineProperty(navigator, 'webdriver', {
             get: () => undefined,
             configurable: false,
             enumerable: false,
           });
         } catch (_2) {
-          // Last resort: Proxy on window.navigator
           window.navigator = new Proxy(navigator, {
             get(t, p) {
               if (p === 'webdriver') return undefined;
@@ -609,7 +589,7 @@ function createSecurityTools({ caller }) {
 
   const spoofWebdriver = {
     name: 'spoof_webdriver',
-    description: 'Patch navigator.webdriver to undefined so anti-bot systems cannot detect CDP automation. Uses Page.addScriptToEvaluateOnNewDocument (runs before any page script on future navigations) + Runtime.evaluate (patches the current page immediately). Call with enabled=false to remove the patch. Run stealth_check after to verify.',
+    description: 'Patch navigator.webdriver to undefined so anti-bot systems cannot detect CDP automation. Uses a persistent CDP session (CdpStealth) that keeps the WebSocket open so Page.addScriptToEvaluateOnNewDocument scripts survive across navigations. Also listens for Page.frameNavigated to re-apply the patch immediately after each navigation. Call with enabled=false to stop. Run stealth_check after to verify.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -623,30 +603,15 @@ function createSecurityTools({ caller }) {
       const enabled = args.enabled !== false;
 
       if (!enabled) {
-        if (spoofScriptId) {
-          await caller.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: spoofScriptId });
-          spoofScriptId = null;
-        }
+        await stealth.stop();
         return [{ type: 'text', text: JSON.stringify({
           spoofActive: false,
-          status: 'Patch removed — navigator.webdriver will be true on next navigation',
+          status: 'Persistent session stopped — webdriver will be true on next navigation',
         }, null, 2) }];
       }
 
-      // Remove stale script if re-enabling
-      if (spoofScriptId) {
-        try { await caller.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: spoofScriptId }); } catch (_) {}
-        spoofScriptId = null;
-      }
+      await stealth.start(WEBDRIVER_PATCH);
 
-      // Layer A: register for all future documents
-      const reg = await caller.call('Page.addScriptToEvaluateOnNewDocument', { source: WEBDRIVER_PATCH });
-      spoofScriptId = reg?.identifier;
-
-      // Layer B: apply to the current page right now
-      await caller.call('Runtime.evaluate', { expression: WEBDRIVER_PATCH });
-
-      // Verify on current page
       const check = await caller.call('Runtime.evaluate', {
         expression: 'navigator.webdriver',
         returnByValue: true,
@@ -654,13 +619,13 @@ function createSecurityTools({ caller }) {
       const currentValue = check?.result?.value;
 
       return [{ type: 'text', text: JSON.stringify({
-        spoofActive:          true,
-        scriptId:             spoofScriptId,
-        currentPagePatched:   currentValue === undefined || currentValue === null,
-        currentWebdriver:     currentValue,
-        status:               currentValue === undefined || currentValue === null
-          ? 'CLEAN — navigator.webdriver is undefined on current page and all future navigations'
-          : 'PARTIAL — script registered for future navigations but current page could not be patched',
+        spoofActive:        true,
+        scriptId:           stealth.getScriptId(),
+        sessionPersistent:  stealth.isActive(),
+        currentWebdriver:   currentValue,
+        status: currentValue === undefined || currentValue === null
+          ? 'CLEAN — webdriver undefined now and after all future navigations (persistent session active)'
+          : 'PARTIAL — session active but current page patch may need a reload to confirm',
       }, null, 2) }];
     },
   };
@@ -943,11 +908,11 @@ function createSecurityTools({ caller }) {
         };` : ''}
       })();`;
 
-      const reg = await caller.call('Page.addScriptToEvaluateOnNewDocument', { source: jsPatches });
-      fpScriptId = reg?.identifier;
-
-      // Apply JS patches to the current page too
-      await caller.call('Runtime.evaluate', { expression: jsPatches });
+      // Use persistent stealth session (same as spoof_webdriver) so the script
+      // survives across navigations. If webdriver is already spoofed, this call
+      // replaces the existing script with the combined fingerprint+webdriver patch.
+      await stealth.start(jsPatches);
+      const fpScriptId = stealth.getScriptId();
 
       // Verify UA visible to JS
       const check = await caller.call('Runtime.evaluate', {
