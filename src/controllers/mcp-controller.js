@@ -10,8 +10,9 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { createMcpStdioProxy } = require('../services/mcp-stdio-proxy');
 
-function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverlay = null, env = process.env, argv = process.argv }) {
+function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverlay = null, customToolsFactory = null, env = process.env, argv = process.argv }) {
   function resolveChromeDevtoolsMcpBin() {
     try {
       return require.resolve('chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js');
@@ -112,12 +113,29 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverl
     const args = [...runner.args, '--browserUrl', browserUrl];
     log(`Spawn: ${runner.cmd} ${args.join(' ')}`);
 
+    // Si hay tools custom, activar modo pipe para que McpStdioProxy
+    // pueda interceptar el JSON-RPC. Sin tools, modo inherit (legacy).
+    const customTools = customToolsFactory ? customToolsFactory({ browserUrl }) : [];
+    const stdioMode = customTools.length > 0 ? ['pipe', 'pipe', 'inherit'] : ['inherit', 'inherit', 'inherit'];
+
     const child = spawn(runner.cmd, args, {
-      stdio: ['inherit', 'inherit', 'inherit'],
+      stdio: stdioMode,
       shell: !!runner.shell,
     });
-    child.on('exit', (code) => process.exit(code || 0));
-    child.on('error', (e) => { log(`spawn error: ${e.message}`); process.exit(1); });
+
+    if (customTools.length > 0) {
+      const proxy = createMcpStdioProxy({
+        tools:  customTools,
+        input:  process.stdin,
+        output: process.stdout,
+        child,
+        log,
+      });
+      proxy.start();
+    } else {
+      child.on('exit',  (code) => process.exit(code || 0));
+      child.on('error', (e)    => { log(`spawn error: ${e.message}`); process.exit(1); });
+    }
   }
 
   return { run };

@@ -1,0 +1,33 @@
+/**
+ * createCustomTools — agrega todos los tools custom del proyecto.
+ *
+ * Sigue el patrón factory del repo: recibe dependencias por inyección,
+ * no importa nada global. El browserUrl se conoce en runtime (dentro de
+ * mcp-controller.run), por eso la factory llega como parámetro al controller.
+ */
+
+const { createCdpCaller }   = require('./_cdp-caller');
+const { createCookieTools } = require('./cookies');
+const { createPdfTools }    = require('./pdf');
+const { createFrameTools }  = require('./frames');
+const { createStorageTools} = require('./storage');
+
+/**
+ * @param {{ browserUrl: string, log?: (msg: string) => void }} opts
+ * @returns {Array<{ name, description, inputSchema, handler }>}
+ */
+function createCustomTools({ browserUrl, log = () => {} }) {
+  const caller = createCdpCaller({ browserUrl });
+
+  const tools = [
+    ...createCookieTools({ caller }),
+    ...createPdfTools({ caller }),
+    ...createFrameTools({ caller }),
+    ...createStorageTools({ caller }),
+  ];
+
+  log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);
+  return tools;
+}
+
+module.exports = { createCustomTools };

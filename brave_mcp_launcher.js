@@ -33,6 +33,7 @@ const { createAutoLaunch } = require('./src/services/auto-launch');
 const { createCursorOverlay } = require('./src/services/cursor-overlay');
 const { OVERLAY_SOURCE } = require('./src/views/overlay-script');
 const { createMcpController } = require('./src/controllers/mcp-controller');
+const { createCustomTools }   = require('./src/tools');
 
 const { checkForUpdate, installedVersion } = require('./src/services/update');
 
@@ -77,6 +78,9 @@ const controller = createMcpController({
   log,
   isWin: platformId === 'win32',
   cursorOverlay,
+  // Factory de tools custom: recibe browserUrl (conocido en runtime dentro de
+  // run()) y devuelve el array de tools a inyectar via McpStdioProxy.
+  customToolsFactory: ({ browserUrl }) => createCustomTools({ browserUrl, log }),
 });
 
 controller.run().catch((e) => { log(`fatal: ${e.message}`); process.exit(1); });
