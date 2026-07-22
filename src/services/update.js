@@ -29,7 +29,7 @@ const REGISTRY_LATEST = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
 
 // Lo que se copia a la ruta fija: los archivos publicados (package.json
 // "files" + bin del manifest). node_modules se maneja aparte.
-const PACKAGE_FILES = ['bin', 'src', 'brave_mcp_launcher.js', 'brave_ipc.py', 'brave_cdp.bat', 'package.json', 'README.md', 'LICENSE'];
+const PACKAGE_FILES = ['bin', 'src', 'brave_mcp_launcher.js', 'package.json', 'README.md', 'LICENSE'];
 
 /** HOME al momento de la llamada (los tests lo aíslan vía USERPROFILE). */
 function home() {

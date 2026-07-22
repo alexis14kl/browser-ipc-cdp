@@ -10,7 +10,7 @@
  * Este archivo solo CABLEA dependencias (composition root); la lógica vive en:
  *   src/platform/               detección win/darwin/linux/wsl (Strategy+Factory)
  *   src/services/cdp-service    cascada ActivePort → procesos → auto-launch
- *   src/services/auto-launch    Adapter de brave_ipc.py (cooldown 30s)
+ *   src/services/auto-launch    abre el navegador con CDP en JS (cooldown 30s)
  *   src/controllers/mcp-controller  orquestación resolver → proxy → spawn MCP
  *   src/views/                  logger (stderr) y cdp_info.json
  *
@@ -23,7 +23,6 @@
  * Flags de diagnóstico: --resolve-only | --proxy-only
  */
 
-const path = require('path');
 const { startProxy } = require('./src/services/cdp-proxy');
 const { getPlatformHelper, getPlatformId } = require('./src/platform');
 const { createLogger } = require('./src/views/logger');
@@ -55,11 +54,7 @@ const platformId = getPlatformId();
 const cdp = createCdpService({
   platform: getPlatformHelper(),
   log,
-  autoLaunch: createAutoLaunch({
-    scriptPath: path.join(__dirname, 'brave_ipc.py'),
-    platformId,
-    log,
-  }),
+  autoLaunch: createAutoLaunch({ log }),
 });
 
 // Overlay del cursor: ENCENDIDO por defecto (opt-out con BROWSER_CDP_CURSOR=0).

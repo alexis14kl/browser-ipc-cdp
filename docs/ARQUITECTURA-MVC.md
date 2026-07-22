@@ -142,9 +142,9 @@ arriba (que se conserva como registro del plan):
 |---|---|
 | `models/browser-registry.js` + `models/cdp-endpoint.js` | Consolidado en `services/browser-detect.js` (registry + detección + launch/kill); no hubo carpeta `models/` |
 | `services/runner-factory.js` | Inline en `mcp-controller.js` (`pickRunner`) |
-| `views/console-view.js` | Absorbido por `views/logger.js` + `views/cli-cdp-info.js` |
+| `views/console-view.js` | Absorbido por `views/logger.js` + `views/cdp-info-view.js` |
 | `index.js` (Facade) | No se creó: los dos bins (`bin/cli.js`, `brave_mcp_launcher.js`) son la API pública |
-| Fase 5 (portar `brave_ipc.py` a JS) | Pendiente: `brave_ipc.py` sigue siendo el auto-launch (envuelto por `services/auto-launch.js`) |
+| Fase 5 (portar `brave_ipc.py` a JS) | **COMPLETADA**: `auto-launch.js` ahora usa `findBrowser`/`launchBrowser` (JS puro). `brave_ipc.py` y `brave_cdp.bat` eliminados. Única dependencia del proyecto: Node ≥ 20.19 (sin Python) |
 
 Agregado fuera del diseño original: `services/cursor-overlay.js` +
 `views/overlay-script.js` — overlay visual del cursor inyectado vía CDP en

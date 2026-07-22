@@ -5,8 +5,7 @@
  * Resuelve el backend real (vía CdpService) e instala el overlay en todas las
  * páginas abiertas. NO es parte de la suite automática (necesita navegador).
  */
-const path = require('path');
-const { getPlatformHelper, getPlatformId } = require('../src/platform');
+const { getPlatformHelper } = require('../src/platform');
 const { createLogger } = require('../src/views/logger');
 const { createCdpService } = require('../src/services/cdp-service');
 const { createAutoLaunch } = require('../src/services/auto-launch');
@@ -18,7 +17,7 @@ const { log } = createLogger({ stream: process.stderr, prefix: '[overlay-demo] '
 const cdp = createCdpService({
   platform: getPlatformHelper(),
   log,
-  autoLaunch: createAutoLaunch({ scriptPath: path.join(__dirname, '..', 'brave_ipc.py'), platformId: getPlatformId(), log }),
+  autoLaunch: createAutoLaunch({ log }),
 });
 
 const overlay = createCursorOverlay({ resolve: () => cdp.resolve(), log, source: OVERLAY_SOURCE });

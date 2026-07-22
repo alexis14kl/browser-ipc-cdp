@@ -33,7 +33,7 @@ chrome-devtools-mcp ──> http://127.0.0.1:9333  (proxy, puerto FIJO)
   auto-launch, cursor-overlay), `controllers/`, `views/`.
 - Cascada de resolución del puerto (rápida → lenta): DevToolsActivePort de los
   perfiles → discovery por procesos (ps+lsof en mac/linux, tasklist+netstat en
-  Windows) → auto-launch via `brave_ipc.py` (último recurso, cooldown 30s).
+  Windows) → auto-launch en JS puro (último recurso, cooldown 30s, sin Python).
 - `cdp_info.json` se sigue escribiendo, pero `CDP_URL` apunta al **proxy** y
   `BACKEND_URL` al puerto real.
 
@@ -53,13 +53,13 @@ else echo WINDOWS; fi
 
 | Entorno | URL del cliente MCP | Cómo lanzar Brave |
 |---------|--------------------|-------------------|
-| **WSL** — Claude Code en WSL, Brave en el host Windows | `http://127.0.0.1:9333` (el proxy corre local) | `cmd.exe /c ...\brave_cdp.bat` |
-| **Windows nativo** | `http://127.0.0.1:9333` | `...\brave_cdp.bat` o `python brave_ipc.py` |
-| **macOS nativo** | `http://127.0.0.1:9333` | `python3 brave_ipc.py` |
-| **Linux nativo** | `http://127.0.0.1:9333` | `python3 brave_ipc.py` |
+| **WSL** — Claude Code en WSL, Brave en el host Windows | `http://127.0.0.1:9333` (el proxy corre local) | `npx browser-ipc-cdp` |
+| **Windows nativo** | `http://127.0.0.1:9333` | `npx browser-ipc-cdp` |
+| **macOS nativo** | `http://127.0.0.1:9333` | `npx browser-ipc-cdp` |
+| **Linux nativo** | `http://127.0.0.1:9333` | `npx browser-ipc-cdp` |
 
 > Con el proxy, **los cuatro entornos usan `127.0.0.1:9333`** desde el lado del
-> cliente. `brave_ipc.py` ya conoce las rutas de Brave en los tres SO.
+> cliente. El CLI (JS puro) ya conoce las rutas de Brave en los cuatro entornos.
 
 ---
 
@@ -89,15 +89,14 @@ Normalmente el launcher lo hace solo (auto-launch on-demand vía el proxy). Si
 hace falta forzarlo:
 
 ```bash
-python3 brave_ipc.py            # macOS / Linux — perfil REAL
-python  brave_ipc.py            # Windows
-python3 brave_ipc.py --clean    # perfil limpio (sesión vacía, para pruebas)
+npx browser-ipc-cdp            # cualquier SO — perfil REAL
+npx browser-ipc-cdp --clean    # perfil limpio (sesión vacía, para pruebas)
 ```
 
 | Comando | Perfil |
 |---------|--------|
-| `brave_ipc.py` | **REAL** — Brave con bookmarks, sesiones, extensiones |
-| `brave_ipc.py --clean` | **Limpio** — sesión vacía |
+| `npx browser-ipc-cdp` | **REAL** — Brave con bookmarks, sesiones, extensiones |
+| `npx browser-ipc-cdp --clean` | **Limpio** — sesión vacía |
 
 Tras lanzar, pide al usuario que haga **`/mcp`** en Claude Code para (re)conectar
 el servidor `brave`. Con el proxy, un cambio de puerto de Brave NO requiere

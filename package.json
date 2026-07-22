@@ -38,8 +38,7 @@
   "files": [
     "bin/",
     "src/",
-    "brave_ipc.py",
-    "brave_cdp.bat",
+    "brave_mcp_launcher.js",
     "README.md",
     "LICENSE"
   ],

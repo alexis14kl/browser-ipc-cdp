@@ -92,7 +92,7 @@ Sistema para controlar **tu Brave Browser real** (con todos tus datos, bookmarks
 ## Arquitectura
 
 ```
-brave_ipc.py lanza Brave
+browser-ipc-cdp lanza Brave (JS puro, sin dependencias externas)
         |
         v
   --remote-debugging-port=0  (OS asigna puerto aleatorio)
@@ -101,10 +101,10 @@ brave_ipc.py lanza Brave
   Brave escribe DevToolsActivePort (archivo IPC)
         |
         v
-  brave_ipc.py lee el puerto → guarda en cdp_info.json
+  CdpService lee el puerto → guarda en cdp_info.json
         |
         v
-  MCP "brave" (brave_mcp_launcher.js) lee cdp_info.json
+  MCP "brave" (brave_mcp_launcher.js) lo resuelve on-demand
         |
         v
   Claude Code usa mcp__brave__* para controlar el navegador
@@ -165,12 +165,13 @@ Mejoras v3.0.x:
 
 | Archivo | Funcion |
 |---------|---------|
-| `brave_ipc.py` | Launcher principal. Abre Brave con CDP dinamico via IPC |
-| `brave_cdp.bat` | Doble-click para ejecutar brave_ipc.py |
+| `bin/cli.js` | CLI instalador (`npx browser-ipc-cdp`): detecta/abre el navegador con CDP y configura el MCP |
 | `brave_mcp_launcher.js` | Wrapper MCP que resuelve el puerto dinamico y lanza chrome-devtools-mcp detras del proxy |
+| `src/services/browser-detect.js` | Deteccion y lanzamiento del navegador con CDP (JS puro, cross-platform) |
+| `src/services/auto-launch.js` | Ultimo recurso del MCP: abre el navegador on-demand (JS, sin Python) |
 | `src/services/cdp-proxy.js` | Proxy CDP en puerto fijo con re-resolucion on-demand y tunel WebSocket |
 | `src/services/cursor-overlay.js` | Inyecta el cursor visual de la IA en cada pagina (v3.0.1, ON por defecto) |
-| `cdp_info.json` | Se genera al ejecutar. Contiene puerto, WebSocket, PID, etc. |
+| `cdp_info.json` | Se genera al ejecutar. Contiene puerto, WebSocket, modo, etc. |
 | `README.md` | Este archivo |
 
 ---
@@ -179,26 +180,29 @@ Mejoras v3.0.x:
 
 ### 1. Abrir Brave con CDP
 
-```bat
-:: Tu Brave real (bookmarks, passwords, extensiones, todo)
-python brave_ipc.py
+```bash
+# Tu Brave real (bookmarks, passwords, extensiones, todo) + configura el MCP
+npx browser-ipc-cdp
 
-:: Perfil limpio separado (para testing)
-python brave_ipc.py --clean
+# Forzar un navegador concreto
+npx browser-ipc-cdp --browser brave   # o chrome / edge
 
-:: Mas opciones
-python brave_ipc.py --port 9222       # Puerto fijo
-python brave_ipc.py --url https://..  # Abre URL al iniciar
-python brave_ipc.py --headless        # Sin ventana visible
-python brave_ipc.py --no-kill         # No mata Brave existente
+# Perfil limpio separado (para testing, no toca tus datos)
+npx browser-ipc-cdp --clean
+
+# Puerto fijo en vez de dinamico
+npx browser-ipc-cdp --port 9222
 ```
+
+Todo es **JS puro** (Node ≥ 20.19), sin dependencias externas. El MCP tambien
+abre el navegador solo (auto-launch) si no encuentra ninguno con CDP activo.
 
 **Modos de perfil:**
 
 | Comando | Perfil | Datos |
 |---------|--------|-------|
-| `python brave_ipc.py` | **REAL** | Todos tus bookmarks, passwords, extensiones, sesiones activas |
-| `python brave_ipc.py --clean` | Limpio | Sesion vacia, sin datos personales |
+| `npx browser-ipc-cdp` | **REAL** | Todos tus bookmarks, passwords, extensiones, sesiones activas |
+| `npx browser-ipc-cdp --clean` | Limpio | Sesion vacia, sin datos personales |
 
 ### 2. Verificar CDP
 
@@ -777,7 +781,7 @@ se crea copia fija — las configs apuntan al repo (flujo `npm link` intacto).
 
 ## Que es IPC?
 
-**Inter-Process Communication** — un proceso (brave_ipc.py) se comunica con otro (Brave) sin usar la red.
+**Inter-Process Communication** — `browser-ipc-cdp` se comunica con Brave sin usar la red: lanza el navegador con `--remote-debugging-port=0` y lee el puerto que el propio Brave escribe en el archivo `DevToolsActivePort`.
 
 ### Flujo tradicional (malo):
 ```
@@ -851,9 +855,9 @@ grep nameserver /etc/resolv.conf
 
 | Problema | Solucion |
 |----------|----------|
-| `brave_ipc.py` no encuentra Brave | Verificar ruta: `C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe` |
+| No encuentra Brave | Verificar ruta: `C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe` (o usar `--browser chrome`/`edge`) |
 | Puerto no detectado | Brave tarda en escribir DevToolsActivePort. Esperar 10s y reintentar |
-| MCP "brave" no conecta | Verificar el proxy: `curl http://127.0.0.1:9333/json/version`. Si responde 502, el navegador no tiene CDP activo: relanzar con `brave_ipc.py` o dejar que el auto-launch lo abra |
+| MCP "brave" no conecta | Verificar el proxy: `curl http://127.0.0.1:9333/json/version`. Si responde 502, el navegador no tiene CDP activo: relanzar con `npx browser-ipc-cdp` o dejar que el auto-launch lo abra |
 | WSL no llega al puerto | Agregar portproxy + firewall (ver seccion anterior) |
 | IP de Windows cambio | `grep nameserver /etc/resolv.conf` → actualizar `.mcp.json` |
 | Brave ya estaba abierto | Usar `--no-kill` o cerrar Brave antes de ejecutar |
@@ -876,7 +880,7 @@ grep nameserver /etc/resolv.conf
 
 Otros scripts deben usar `CDP_URL`: con `MODE: "PROXY"` apunta al proxy fijo,
 que sigue valido aunque el navegador se reinicie. `BACKEND_URL` es el puerto
-real del navegador y cambia en cada arranque. Nota: `brave_ipc.py` y cada
+real del navegador y cambia en cada arranque. Nota: tanto el CLI como cada
 instancia del MCP escriben este archivo; con varias sesiones concurrentes el
 contenido refleja la ultima que escribio.
 
@@ -908,11 +912,11 @@ Todo sin necesidad de login adicional — usa tus sesiones activas.
 
 3. Listo! Claude Code controla tu navegador real.
    Si no estaba abierto, la primera tool call lo lanza sola (auto-launch
-   via brave_ipc.py) y el proxy :9333 re-resuelve el puerto en cada conexion.
+   en JS puro) y el proxy :9333 re-resuelve el puerto en cada conexion.
 
 Opcional (manual):
-   python brave_ipc.py          # abrir el navegador con CDP dinamico a mano
-   python brave_ipc.py --clean  # perfil limpio para testing
+   npx browser-ipc-cdp          # abrir el navegador con CDP dinamico a mano
+   npx browser-ipc-cdp --clean  # perfil limpio para testing
 ```
 
 > En WSL ademas hace falta el portproxy + firewall de la seccion

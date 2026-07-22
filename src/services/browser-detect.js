@@ -373,11 +373,19 @@ function killBrowser(exe) {
   } catch (e) {}
 }
 
-function launchBrowser(browser, { port = 0, clean = false } = {}) {
+function launchBrowser(browser, { port = 0, clean = false, noKill = false } = {}) {
   return new Promise((resolve, reject) => {
-    killBrowser(browser.exe);
+    // noKill (auto-launch del MCP): no cerramos la sesión del usuario. Si el
+    // navegador YA corre sin CDP, Chromium ignora --remote-debugging-port al
+    // reusar el proceso → forzamos un perfil separado para abrir una 2da
+    // instancia que sí exponga CDP sin tocar la sesión real.
+    if (noKill) {
+      if (isBrowserRunning(browser.exe)) clean = true;
+    } else {
+      killBrowser(browser.exe);
+    }
 
-    // Wait for process to die
+    // Sin kill no hay que esperar a que muera el proceso anterior.
     setTimeout(() => {
       const defaultUserData = browser.userData || getBrowserPaths(browser.name).userData || '';
       const userData = clean
@@ -443,7 +451,7 @@ function launchBrowser(browser, { port = 0, clean = false } = {}) {
         };
         check();
       }
-    }, 2000);
+    }, noKill ? 0 : 2000);
   });
 }
 
