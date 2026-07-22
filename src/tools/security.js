@@ -6,8 +6,10 @@
  *   detect_third_party_scripts — identificación de scripts de terceros / supply chain
  *   analyze_network_waterfall  — mapa de peticiones, mixed content, dominios sospechosos
  *   stealth_check             — detección de fingerprints de automatización CDP/browser
- *   bypass_csp  [OFFENSIVE]  — Page.setBypassCSP(true): deshabilita todos los
+ *   bypass_csp      [OFF]    — Page.setBypassCSP(true): deshabilita todos los
  *                              Content-Security-Policy headers del sitio objetivo
+ *   spoof_webdriver [OFF]    — Page.addScriptToEvaluateOnNewDocument + Runtime.evaluate
+ *                              para ocultar navigator.webdriver antes de cualquier script
  *
  * Nota: get_cookies (via Network.getCookies) ya expone cookies HttpOnly porque CDP
  * opera bajo la sandbox de JS — documentado en su description.
@@ -535,7 +537,113 @@ function createSecurityTools({ caller }) {
     },
   };
 
-  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck, bypassCsp];
+  // 6. spoof_webdriver ────────────────────────────────────────────────────────
+  //
+  // Two-layer approach required:
+  //   Layer A — Page.addScriptToEvaluateOnNewDocument: runs BEFORE any page
+  //             script on every future navigation. This is the only reliable
+  //             way to hide webdriver from anti-bot checks that run at parse
+  //             time (before Runtime.evaluate can fire).
+  //   Layer B — Runtime.evaluate on the current document: patches the already-
+  //             loaded page immediately without waiting for a reload.
+  //
+  // The patch itself uses a fallback chain because navigator.webdriver is
+  // non-configurable on CDP-attached sessions in some Chrome builds:
+  //   1. Object.defineProperty (fastest, cleanest)
+  //   2. delete + redefine (works if property is deletable)
+  //   3. Proxy on window.navigator (last resort, slightly detectable)
+  //
+  // scriptId stored in closure so enabled=false can remove the exact script
+  // that was registered without touching scripts added by other tools.
+  let spoofScriptId = null;
+
+  const WEBDRIVER_PATCH = `
+    (function() {
+      const patch = () => {
+        try {
+          Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+            configurable: true,
+            enumerable: false,
+          });
+        } catch (_) {
+          try {
+            delete navigator.webdriver;
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+          } catch (_2) {
+            window.navigator = new Proxy(navigator, {
+              get(t, p) {
+                if (p === 'webdriver') return undefined;
+                const v = t[p];
+                return typeof v === 'function' ? v.bind(t) : v;
+              },
+            });
+          }
+        }
+      };
+      patch();
+    })();
+  `;
+
+  const spoofWebdriver = {
+    name: 'spoof_webdriver',
+    description: 'Patch navigator.webdriver to undefined so anti-bot systems cannot detect CDP automation. Uses Page.addScriptToEvaluateOnNewDocument (runs before any page script on future navigations) + Runtime.evaluate (patches the current page immediately). Call with enabled=false to remove the patch. Run stealth_check after to verify.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: {
+          type: 'boolean',
+          description: 'true = activate spoof (default). false = remove it.',
+        },
+      },
+    },
+    async handler(args) {
+      const enabled = args.enabled !== false;
+
+      if (!enabled) {
+        if (spoofScriptId) {
+          await caller.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: spoofScriptId });
+          spoofScriptId = null;
+        }
+        return [{ type: 'text', text: JSON.stringify({
+          spoofActive: false,
+          status: 'Patch removed — navigator.webdriver will be true on next navigation',
+        }, null, 2) }];
+      }
+
+      // Remove stale script if re-enabling
+      if (spoofScriptId) {
+        try { await caller.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: spoofScriptId }); } catch (_) {}
+        spoofScriptId = null;
+      }
+
+      // Layer A: register for all future documents
+      const reg = await caller.call('Page.addScriptToEvaluateOnNewDocument', { source: WEBDRIVER_PATCH });
+      spoofScriptId = reg?.identifier;
+
+      // Layer B: apply to the current page right now
+      await caller.call('Runtime.evaluate', { expression: WEBDRIVER_PATCH });
+
+      // Verify on current page
+      const check = await caller.call('Runtime.evaluate', {
+        expression: 'navigator.webdriver',
+        returnByValue: true,
+      });
+      const currentValue = check?.result?.value;
+
+      return [{ type: 'text', text: JSON.stringify({
+        spoofActive:          true,
+        scriptId:             spoofScriptId,
+        currentPagePatched:   currentValue === undefined || currentValue === null,
+        currentWebdriver:     currentValue,
+        status:               currentValue === undefined || currentValue === null
+          ? 'CLEAN — navigator.webdriver is undefined on current page and all future navigations'
+          : 'PARTIAL — script registered for future navigations but current page could not be patched',
+      }, null, 2) }];
+    },
+  };
+
+  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck, bypassCsp, spoofWebdriver];
 }
 
 module.exports = { createSecurityTools };
