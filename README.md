@@ -516,6 +516,234 @@ mcp__brave__get_accessibility_tree { depth: 3 }
 
 ---
 
+## Casos de uso QA — Flujos completos
+
+> Cada bloque es un flujo end-to-end que puedes pedirle a Claude directamente.
+> El agente de IA ejecuta los tools en secuencia, correlaciona resultados y reporta.
+
+---
+
+### 1. Smoke test de un flujo de login
+
+```
+Objetivo: verificar que login funciona y persiste sesión correctamente.
+
+1. navigate_page      → ir a /login
+2. fill_form          → usuario + contraseña
+3. click              → botón Ingresar
+4. wait_for           → texto "Bienvenido" o dashboard
+5. take_screenshot    → evidencia visual
+6. get_cookies        → verificar cookie de sesión presente (HttpOnly, Secure)
+7. get_local_storage  → verificar token guardado (si aplica)
+```
+
+---
+
+### 2. Test de manejo de errores HTTP (Chaos Testing)
+
+```
+Objetivo: verificar que la UI responde correctamente a errores del servidor.
+
+1. navigate_page  → ir a la sección a testear
+2. inject_error   → urlPattern "*/api/productos*", statusCode 500
+3. click / fill   → ejecutar la acción que dispara la petición
+4. wait_for       → mensaje de error en UI ("Algo salió mal", toast, etc.)
+5. take_screenshot → evidencia del estado de error
+6. inject_error   → statusCode 404  (repetir con distintos códigos)
+7. inject_error   → statusCode 401  (verificar redirect a login)
+8. clear_request_interception → limpiar
+```
+
+---
+
+### 3. Test de integración API — frontend vs backend real
+
+```
+Objetivo: comparar comportamiento de UI con backend real vs respuesta mockeada.
+
+# Con backend real
+1. navigate_page + monitor_network  → capturar requests reales
+2. get_request_body                 → ver payload exacto que envía el frontend
+3. capture_payloads                 → ver todos los POST bodies
+
+# Con backend mockeado (aislar frontend)
+4. mock_api { urlPattern: "*/api/*", responseBody: {...} }
+5. navegar y ejecutar flujo         → la UI recibe datos sintéticos
+6. take_screenshot                  → comparar con estado real
+```
+
+---
+
+### 4. Test de performance y cobertura de código
+
+```
+Objetivo: medir qué código JS/CSS realmente se usa en un flujo y dónde están los cuellos de botella.
+
+1. clear_browser_cache              → test desde cero
+2. start_js_coverage + start_css_coverage
+3. performance_start_trace
+4. navigate_page → ejecutar flujo completo (login → acción principal → logout)
+5. performance_stop_trace           → ver eventos, long tasks, layout thrashing
+6. stop_js_coverage { minCoverage: 70 }  → funciones no ejecutadas = dead code
+7. stop_css_coverage { unusedOnly: true } → reglas CSS sin uso = CSS muerto
+8. analyze_network_waterfall        → recursos lentos, mixed content, protocolos
+9. take_memory_snapshot             → detectar memory leaks post-flujo
+```
+
+---
+
+### 5. Test de accesibilidad (a11y)
+
+```
+Objetivo: verificar que la UI es accesible y no rompe AT (lectores de pantalla).
+
+1. navigate_page          → ir a la página a auditar
+2. get_accessibility_tree { depth: 4 }  → ver jerarquía ARIA real
+3. lighthouse_audit       → score accesibilidad + lista de violaciones
+4. evaluate_script        → document.querySelectorAll('[role]') para ver roles
+5. get_dom_element        → verificar aria-label, aria-describedby en inputs clave
+```
+
+---
+
+### 6. Test de estado del cliente (Storage QA)
+
+```
+Objetivo: verificar que la app guarda y limpia el estado correctamente.
+
+# Pre-flujo
+1. get_local_storage / get_session_storage / get_cookies  → baseline vacío
+
+# Después de login
+2. get_cookies        → sesión establecida
+3. get_local_storage  → tokens/preferencias guardados
+
+# Después de logout
+4. get_cookies        → cookie de sesión eliminada
+5. get_local_storage  → estado limpio
+6. get_session_storage → limpio
+
+# IndexedDB (apps con cache offline)
+7. list_indexed_db    → ver bases y object stores
+8. get_indexed_db_data → verificar registros sincronizados
+```
+
+---
+
+### 7. Test multi-dispositivo (Device Emulation)
+
+```
+Objetivo: verificar comportamiento en móvil sin dispositivo físico.
+
+1. emulate { device: "iPhone 14" }     → viewport + UA + touch
+2. navigate_page                        → cargar la app
+3. take_screenshot                      → ver layout mobile
+4. emulate_network { preset: "3g" }    → simular red lenta
+5. navigate_page                        → medir tiempo de carga real en 3G
+6. analyze_network_waterfall            → identificar recursos que bloquean render
+7. emulate { restore: true }           → volver a desktop
+```
+
+---
+
+### 8. QA de seguridad (Security QA)
+
+```
+Objetivo: verificar hardening básico de la app antes de release.
+
+1. navigate_page + security_audit_headers  → CSP, HSTS, X-Frame-Options, CORS
+2. detect_third_party_scripts              → scripts de terceros no autorizados
+3. analyze_third_party_risk { waitMs: 3000 } → scripts dinámicos + ofuscación
+4. extract_http_only_cookies               → verificar cookies marcadas HttpOnly + Secure
+5. stealth_check                           → fingerprint de automatización visible
+
+# Verificar que la app NO filtra datos en error responses
+6. inject_error { urlPattern: "*/api/*", statusCode: 500 }
+7. monitor_network → revisar que el body del error no exponga stack traces / paths internos
+```
+
+---
+
+### 9. Fuzzing de parámetros con sesión viva
+
+```
+Objetivo: testear validaciones del backend con inputs malformados, manteniendo auth.
+
+1. navigate_page + login  → establecer sesión real
+2. replay_request {
+     url: "https://app.com/api/search",
+     method: "POST",
+     body: '{"query":"{{INPUT}}"}',
+     fuzz: {
+       INPUT: ["normal", "", "' OR 1=1--", "<script>alert(1)</script>", "A".repeat(5000)]
+     }
+   }
+3. Analizar respuestas: status 400=validado, 500=crash, 200 con datos = posible SQLi
+```
+
+---
+
+### 10. MitM local — modificar respuesta del servidor en tiempo real
+
+```
+Objetivo: testear cómo reacciona el frontend a datos manipulados sin tocar el backend.
+
+1. network_intercept_modify { action: "start" }
+2. network_intercept_modify {
+     action: "add_rule",
+     urlPattern: "*/api/user*",
+     stage: "response",
+     responseModifications: {
+       jsonPatch: [
+         { op: "set", path: "/role",        value: "superadmin" },
+         { op: "set", path: "/permissions", value: ["read","write","delete","admin"] }
+       ]
+     }
+   }
+3. navigate_page → cargar el perfil del usuario
+4. take_screenshot → ver si la UI muestra opciones de admin (privilege escalation test)
+5. network_intercept_modify { action: "stop" }
+```
+
+---
+
+### 11. Monitoreo continuo de consola y red (debug en CI)
+
+```
+Objetivo: ejecutar un flujo completo y capturar TODOS los errores sin intervención manual.
+
+1. monitor_console   → activar captura de logs (persiste entre navegaciones)
+2. monitor_network   → activar captura de requests
+3. [ejecutar flujo completo: login → navegación → acción → logout]
+4. monitor_console   → buscar errores/warnings
+5. monitor_network   → buscar requests fallidas (status >= 400), requests lentas
+6. get_request_body  → ver body completo de cualquier request sospechosa
+```
+
+---
+
+### 12. Inyección de script en respuestas HTML (red team / XSS verification)
+
+```
+Objetivo: verificar si la app ejecuta scripts inyectados en respuestas (XSS stored/reflected).
+
+1. network_intercept_modify { action: "start" }
+2. network_intercept_modify {
+     action: "add_rule",
+     urlPattern: "*/dashboard*",
+     stage: "response",
+     responseModifications: {
+       injectScript: "window.__xssVerified = true; console.log('XSS payload ejecutado');"
+     }
+   }
+3. navigate_page → /dashboard
+4. evaluate_script → "window.__xssVerified"  # true = CSP no bloquea scripts inyectados
+5. list_console_messages → verificar log del payload
+6. bypass_csp { enabled: false }  # si hay CSP, desactivar para comparar
+```
+
+---
+
 ## Actualizacion y desinstalacion
 
 El instalador se auto-copia a una **ruta fija** (`~/.browser-ipc-cdp/app`) y
