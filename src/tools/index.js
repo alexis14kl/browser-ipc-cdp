@@ -21,6 +21,7 @@ const { createAdvancedTools }       = require('./advanced');
 const { createCoverageTools }       = require('./coverage');
 const { createConsoleTools }        = require('./console');
 const { createNetworkMonitorTools } = require('./network-monitor');
+const { createSecurityTools }       = require('./security');
 const { createCdpInterceptor }      = require('../services/cdp-interceptor');
 const { createCdpCoverage }         = require('../services/cdp-coverage');
 const { createCdpConsole }          = require('../services/cdp-console');
@@ -52,6 +53,7 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createCoverageTools({ coverage }),
     ...createConsoleTools({ console: consoleSvc }),
     ...createNetworkMonitorTools({ networkMonitor }),
+    ...createSecurityTools({ caller }),
   ];
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);

@@ -1,0 +1,466 @@
+/**
+ * Security tools — análisis defensivo y reconocimiento de superficie de ataque.
+ *
+ * Diseñados para pentesting autorizado, auditorías y red team:
+ *   security_audit_headers   — análisis de cabeceras HTTP de seguridad
+ *   detect_third_party_scripts — identificación de scripts de terceros / supply chain
+ *   analyze_network_waterfall  — mapa de peticiones, mixed content, dominios sospechosos
+ *   stealth_check             — detección de fingerprints de automatización CDP/browser
+ *
+ * Nota: get_cookies (via Network.getCookies) ya expone cookies HttpOnly porque CDP
+ * opera bajo la sandbox de JS — documentado en su description.
+ */
+
+// ── Catálogo de cabeceras de seguridad ────────────────────────────────────────
+
+const SEC_HEADERS = [
+  {
+    key: 'content-security-policy',
+    label: 'Content-Security-Policy',
+    critical: true,
+    check(v) {
+      const issues = [];
+      if (v.includes("'unsafe-inline'")) issues.push("'unsafe-inline' permite inyección XSS");
+      if (v.includes("'unsafe-eval'"))   issues.push("'unsafe-eval' permite ejecución de código arbitrario");
+      if (/script-src[^;]*\*/.test(v))   issues.push('wildcard en script-src permite cualquier dominio');
+      if (!v.includes('default-src') && !v.includes('script-src'))
+        issues.push('falta script-src / default-src — sin protección XSS efectiva');
+      return { present: true, value: v.substring(0, 200), issues, grade: grade(issues, { 0: 'A', 1: 'B', 2: 'C' }, 'D') };
+    },
+    absent: () => ({ present: false, issues: ['Ausente — XSS no mitigado por política de contenido'], grade: 'F' }),
+  },
+  {
+    key: 'strict-transport-security',
+    label: 'Strict-Transport-Security (HSTS)',
+    critical: true,
+    check(v) {
+      const issues = [];
+      const maxAge = parseInt(v.match(/max-age=(\d+)/)?.[1] || '0');
+      if (maxAge < 31536000) issues.push(`max-age ${maxAge}s < 1 año (mín recomendado: 31536000)`);
+      if (!v.includes('includeSubDomains')) issues.push('falta includeSubDomains — subdominios vulnerables a SSL stripping');
+      return { present: true, value: v, maxAgeDays: Math.round(maxAge / 86400), issues, grade: grade(issues, { 0: 'A', 1: 'B' }, 'C') };
+    },
+    absent: () => ({ present: false, issues: ['Ausente — SSL stripping posible'], grade: 'F' }),
+  },
+  {
+    key: 'x-frame-options',
+    label: 'X-Frame-Options',
+    critical: false,
+    check(v) {
+      const issues = /ALLOW/i.test(v) && !/ALLOW-FROM/i.test(v) ? [] :
+        v.toUpperCase() === 'ALLOWALL' ? ['ALLOWALL — clickjacking posible'] : [];
+      return { present: true, value: v, issues, grade: issues.length ? 'F' : 'A' };
+    },
+    absent: () => ({ present: false, issues: ['Ausente — clickjacking posible (verificar frame-ancestors en CSP)'], grade: 'C' }),
+  },
+  {
+    key: 'x-content-type-options',
+    label: 'X-Content-Type-Options',
+    critical: false,
+    check(v) {
+      const issues = v.toLowerCase() !== 'nosniff' ? ['Valor debe ser "nosniff"'] : [];
+      return { present: true, value: v, issues, grade: issues.length ? 'B' : 'A' };
+    },
+    absent: () => ({ present: false, issues: ['Ausente — MIME-sniffing posible'], grade: 'C' }),
+  },
+  {
+    key: 'referrer-policy',
+    label: 'Referrer-Policy',
+    critical: false,
+    check(v) {
+      const risky = ['unsafe-url', 'origin-when-cross-origin'];
+      const issues = risky.includes(v.toLowerCase()) ? [`"${v}" filtra URL completa a terceros`] : [];
+      return { present: true, value: v, issues, grade: issues.length ? 'C' : 'A' };
+    },
+    absent: () => ({ present: false, issues: ['Ausente — navegador usa política por defecto (puede filtrar referrer)'], grade: 'C' }),
+  },
+  {
+    key: 'permissions-policy',
+    label: 'Permissions-Policy',
+    critical: false,
+    check(v) {
+      return { present: true, value: v.substring(0, 120), issues: [], grade: 'A' };
+    },
+    absent: () => ({ present: false, issues: ['Ausente — sin política explícita de APIs del navegador'], grade: 'C' }),
+  },
+  {
+    key: 'access-control-allow-origin',
+    label: 'CORS (Access-Control-Allow-Origin)',
+    critical: false,
+    check(v) {
+      const issues = v === '*' ? ['Wildcard CORS — cualquier origen puede leer respuestas (peligroso en APIs autenticadas)'] : [];
+      return { present: true, value: v, issues, grade: issues.length ? 'D' : 'A' };
+    },
+    absent: () => ({ present: false, issues: [], grade: 'N/A', note: 'Normal en páginas no-API' }),
+  },
+  {
+    key: 'x-xss-protection',
+    label: 'X-XSS-Protection (deprecado)',
+    critical: false,
+    check(v) {
+      return { present: true, value: v, issues: [], grade: 'B', note: 'Deprecado — reemplazar con CSP' };
+    },
+    absent: () => ({ present: false, issues: [], grade: 'N/A', note: 'Deprecado — usar CSP' }),
+  },
+];
+
+// ── Catálogo de servicios de terceros conocidos ───────────────────────────────
+
+const KNOWN_SERVICES = {
+  'google-analytics.com':    { name: 'Google Analytics',    category: 'analytics',  risk: 'low' },
+  'googletagmanager.com':    { name: 'Google Tag Manager',  category: 'tag-mgr',    risk: 'medium' },
+  'googlesyndication.com':   { name: 'Google AdSense',      category: 'ads',        risk: 'low' },
+  'doubleclick.net':         { name: 'Google DoubleClick',  category: 'ads',        risk: 'low' },
+  'facebook.net':            { name: 'Facebook Pixel',      category: 'tracking',   risk: 'medium' },
+  'connect.facebook.net':    { name: 'Facebook SDK',        category: 'social',     risk: 'medium' },
+  'recaptcha.net':           { name: 'Google reCAPTCHA',    category: 'security',   risk: 'low' },
+  'gstatic.com':             { name: 'Google Static',       category: 'cdn',        risk: 'low' },
+  'google.com':              { name: 'Google',              category: 'misc',       risk: 'low' },
+  'googleapis.com':          { name: 'Google APIs',         category: 'cdn',        risk: 'low' },
+  'cdn.jsdelivr.net':        { name: 'jsDelivr CDN',        category: 'cdn',        risk: 'low' },
+  'cdnjs.cloudflare.com':    { name: 'Cloudflare CDN',      category: 'cdn',        risk: 'low' },
+  'unpkg.com':               { name: 'unpkg CDN',           category: 'cdn',        risk: 'low' },
+  'cloudflare.com':          { name: 'Cloudflare',          category: 'cdn',        risk: 'low' },
+  'amazonaws.com':           { name: 'AWS S3/CloudFront',   category: 'cloud',      risk: 'low' },
+  'azurefd.net':             { name: 'Azure Front Door',    category: 'cloud',      risk: 'low' },
+  'hotjar.com':              { name: 'Hotjar',              category: 'analytics',  risk: 'medium' },
+  'mixpanel.com':            { name: 'Mixpanel',            category: 'analytics',  risk: 'medium' },
+  'segment.com':             { name: 'Segment',             category: 'analytics',  risk: 'medium' },
+  'amplitude.com':           { name: 'Amplitude',           category: 'analytics',  risk: 'medium' },
+  'intercom.io':             { name: 'Intercom',            category: 'support',    risk: 'medium' },
+  'stripe.com':              { name: 'Stripe',              category: 'payment',    risk: 'low' },
+  'paypal.com':              { name: 'PayPal',              category: 'payment',    risk: 'low' },
+  'jquery.com':              { name: 'jQuery CDN',          category: 'cdn',        risk: 'low' },
+  'bootstrapcdn.com':        { name: 'Bootstrap CDN',       category: 'cdn',        risk: 'low' },
+  'sentry.io':               { name: 'Sentry',              category: 'monitoring', risk: 'low' },
+  'bugsnag.com':             { name: 'Bugsnag',             category: 'monitoring', risk: 'low' },
+  'datadog-browser-agent.com': { name: 'Datadog RUM',       category: 'monitoring', risk: 'low' },
+  'newrelic.com':            { name: 'New Relic',           category: 'monitoring', risk: 'low' },
+  'recaptcha.google.com':    { name: 'Google reCAPTCHA',    category: 'security',   risk: 'low' },
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function grade(issues, map, fallback) {
+  const n = issues.length;
+  return map[n] ?? fallback;
+}
+
+function classifyHost(srcUrl, pageHost) {
+  try {
+    const host = new URL(srcUrl).hostname.replace(/^www\./, '');
+    const isThirdParty = host !== pageHost && !host.endsWith('.' + pageHost);
+    const knownEntry = Object.entries(KNOWN_SERVICES).find(([k]) => host.endsWith(k));
+    return {
+      host,
+      thirdParty: isThirdParty,
+      service: knownEntry ? knownEntry[1].name : null,
+      category: knownEntry ? knownEntry[1].category : null,
+      risk: knownEntry ? knownEntry[1].risk : (isThirdParty ? 'unknown' : 'same-origin'),
+    };
+  } catch { return null; }
+}
+
+// ── Tools ─────────────────────────────────────────────────────────────────────
+
+function createSecurityTools({ caller }) {
+
+  // 1. security_audit_headers ─────────────────────────────────────────────────
+  const securityAuditHeaders = {
+    name: 'security_audit_headers',
+    description: 'Audit HTTP security headers of the current page (CSP, HSTS, X-Frame-Options, CORS, etc.). Grades each header A-F and lists misconfigurations. Useful for defensive audits and demonstrating header-based vulnerabilities.',
+    inputSchema: { type: 'object', properties: {} },
+    async handler() {
+      // Obtener cabeceras via fetch desde el contexto de la página (mismo origen)
+      const expr = `(async () => {
+        const url = location.href;
+        try {
+          const r = await fetch(url, { method: 'HEAD', credentials: 'include', cache: 'no-store' });
+          const headers = {};
+          r.headers.forEach((v, k) => { headers[k] = v; });
+          return { ok: true, status: r.status, url, headers };
+        } catch (e1) {
+          try {
+            const r = await fetch(url, { credentials: 'include', cache: 'no-store',
+              signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined });
+            const headers = {};
+            r.headers.forEach((v, k) => { headers[k] = v; });
+            return { ok: true, status: r.status, url, headers };
+          } catch(e2) {
+            return { ok: false, error: e2.message };
+          }
+        }
+      })()`;
+
+      const res = await caller.call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+      const data = res?.result?.value;
+      if (!data?.ok) {
+        return [{ type: 'text', text: JSON.stringify({ error: 'No se pudo obtener cabeceras', detail: data?.error }, null, 2) }];
+      }
+
+      const headers = data.headers;
+      const results = SEC_HEADERS.map(def => {
+        const val = headers[def.key];
+        return { header: def.label, critical: def.critical, ...(val ? def.check(val) : def.absent()) };
+      });
+
+      const score = results.filter(r => r.critical && r.grade === 'F').length;
+      const summary = {
+        url: data.url,
+        httpStatus: data.status,
+        criticalFails: score,
+        overallRisk: score === 0 ? 'LOW' : score === 1 ? 'MEDIUM' : 'HIGH',
+        headers: results,
+      };
+
+      return [{ type: 'text', text: JSON.stringify(summary, null, 2) }];
+    },
+  };
+
+  // 2. detect_third_party_scripts ─────────────────────────────────────────────
+  const detectThirdPartyScripts = {
+    name: 'detect_third_party_scripts',
+    description: 'Identify all third-party scripts, iframes and stylesheets on the current page. Classifies known services (Analytics, CDN, Ads, Tracking) and flags unknown third parties — useful for supply chain attack surface mapping.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        riskFilter: {
+          type: 'string',
+          enum: ['all', 'unknown', 'medium', 'high'],
+          description: 'Return only resources matching this risk level. Default: all.',
+        },
+      },
+    },
+    async handler(args) {
+      const riskFilter = args.riskFilter || 'all';
+
+      const expr = `(() => {
+        const origin = location.hostname.replace(/^www\\./, '');
+        function info(src) {
+          if (!src) return null;
+          try {
+            const url = new URL(src, location.href);
+            return { src: url.href, host: url.hostname };
+          } catch { return null; }
+        }
+        const scripts    = Array.from(document.querySelectorAll('script[src]')).map(e => info(e.src)).filter(Boolean);
+        const styles     = Array.from(document.querySelectorAll('link[rel="stylesheet"][href]')).map(e => info(e.href)).filter(Boolean);
+        const iframes    = Array.from(document.querySelectorAll('iframe[src]')).map(e => info(e.src)).filter(Boolean);
+        const imgs       = Array.from(document.querySelectorAll('img[src]')).map(e => info(e.src)).filter(Boolean);
+        return { origin, scripts, styles, iframes, imgs };
+      })()`;
+
+      const res = await caller.call('Runtime.evaluate', { expression: expr, returnByValue: true });
+      const { origin, scripts, styles, iframes, imgs } = res?.result?.value || {};
+
+      function classify(items, type) {
+        return items.map(({ src, host }) => {
+          const pageHost = origin.replace(/^www\./, '');
+          const clean    = host.replace(/^www\./, '');
+          const isThird  = clean !== pageHost && !clean.endsWith('.' + pageHost);
+          const entry    = Object.entries(KNOWN_SERVICES).find(([k]) => clean.endsWith(k));
+          return {
+            type,
+            src: src.length > 120 ? src.substring(0, 120) + '...' : src,
+            host: clean,
+            thirdParty: isThird,
+            service: entry ? entry[1].name     : null,
+            category: entry ? entry[1].category : null,
+            risk:     entry ? entry[1].risk     : (isThird ? 'unknown' : 'same-origin'),
+          };
+        }).filter(r => r.thirdParty);
+      }
+
+      let all = [
+        ...classify(scripts, 'script'),
+        ...classify(styles,  'stylesheet'),
+        ...classify(iframes, 'iframe'),
+        ...classify(imgs,    'image'),
+      ];
+
+      if (riskFilter !== 'all') {
+        const order = { unknown: 3, high: 2, medium: 1, low: 0, 'same-origin': -1 };
+        const minRisk = order[riskFilter] ?? 0;
+        all = all.filter(r => (order[r.risk] ?? 0) >= minRisk);
+      }
+
+      const byHost = {};
+      all.forEach(r => {
+        if (!byHost[r.host]) byHost[r.host] = { host: r.host, service: r.service, category: r.category, risk: r.risk, resources: [] };
+        byHost[r.host].resources.push({ type: r.type, src: r.src });
+      });
+
+      const result = {
+        pageOrigin: origin,
+        thirdPartyCount: Object.keys(byHost).length,
+        unknownCount: Object.values(byHost).filter(h => h.risk === 'unknown').length,
+        domains: Object.values(byHost).sort((a, b) => (b.risk === 'unknown' ? 1 : 0) - (a.risk === 'unknown' ? 1 : 0)),
+      };
+
+      return [{ type: 'text', text: JSON.stringify(result, null, 2) }];
+    },
+  };
+
+  // 3. analyze_network_waterfall ──────────────────────────────────────────────
+  const analyzeNetworkWaterfall = {
+    name: 'analyze_network_waterfall',
+    description: 'Analyze the page resource waterfall using PerformanceResourceTiming API. Detects mixed content (HTTP on HTTPS pages), slow resources, cross-origin requests and connection protocol breakdown. No monitoring session needed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slowMs: {
+          type: 'number',
+          description: 'Threshold in ms to flag slow resources. Default: 1000.',
+        },
+        includeAll: {
+          type: 'boolean',
+          description: 'Include same-origin resources. Default: false (only third-party + anomalies).',
+        },
+      },
+    },
+    async handler(args) {
+      const slowMs    = args.slowMs ?? 1000;
+      const includeAll = args.includeAll === true;
+
+      const expr = `(() => {
+        const entries = performance.getEntriesByType('resource');
+        const pageProto = location.protocol;
+        const pageHost  = location.hostname.replace(/^www\\./, '');
+        return entries.map(e => {
+          let host = '', proto = '';
+          try { const u = new URL(e.name); host = u.hostname.replace(/^www\\./, ''); proto = u.protocol; } catch {}
+          const isThird    = host !== pageHost && !host.endsWith('.' + pageHost);
+          const mixedContent = pageProto === 'https:' && proto === 'http:';
+          const slow       = e.duration > ${slowMs};
+          return {
+            name:         e.name.length > 100 ? e.name.substring(0, 100) + '...' : e.name,
+            host,
+            proto,
+            type:         e.initiatorType,
+            durationMs:   Math.round(e.duration),
+            sizeKB:       e.transferSize > 0 ? +(e.transferSize / 1024).toFixed(1) : null,
+            cached:       e.transferSize === 0 && e.decodedBodySize > 0,
+            protocol:     e.nextHopProtocol || null,
+            thirdParty:   isThird,
+            mixedContent,
+            slow,
+          };
+        });
+      })()`;
+
+      const res = await caller.call('Runtime.evaluate', { expression: expr, returnByValue: true });
+      const entries = res?.result?.value || [];
+
+      const flagged    = entries.filter(e => e.mixedContent || e.slow);
+      const thirdParty = entries.filter(e => e.thirdParty);
+      const mixed      = entries.filter(e => e.mixedContent);
+      const slow       = entries.filter(e => e.slow);
+
+      const protocols = {};
+      entries.forEach(e => { if (e.protocol) protocols[e.protocol] = (protocols[e.protocol] || 0) + 1; });
+
+      const result = {
+        url:            location?.href,
+        totalResources: entries.length,
+        thirdParty:     thirdParty.length,
+        mixedContent:   mixed.length,
+        slowResources:  slow.length,
+        protocols,
+        issues: [
+          ...mixed.map(e => ({ type: 'MIXED_CONTENT', resource: e.name, host: e.host })),
+          ...slow.map(e =>  ({ type: 'SLOW', resource: e.name, durationMs: e.durationMs })),
+        ],
+        thirdPartyDomains: [...new Set(thirdParty.map(e => e.host))],
+        resources: includeAll ? entries : [...flagged, ...thirdParty].filter((v, i, a) => a.indexOf(v) === i),
+      };
+
+      return [{ type: 'text', text: JSON.stringify(result, null, 2) }];
+    },
+  };
+
+  // 4. stealth_check ──────────────────────────────────────────────────────────
+  const stealthCheck = {
+    name: 'stealth_check',
+    description: 'Detect browser automation fingerprints that anti-bot systems use to identify CDP/Playwright/Puppeteer/Selenium sessions. Reports exposed signals and rates overall detectability risk.',
+    inputSchema: { type: 'object', properties: {} },
+    async handler() {
+      const expr = `(() => {
+        const findings = {};
+
+        // navigator.webdriver — señal más básica de automatización
+        findings.webdriver = { value: navigator.webdriver, risk: navigator.webdriver ? 'HIGH' : 'OK' };
+
+        // Chrome runtime — ausente en headless puro
+        const hasChromeRuntime = !!(window.chrome && (window.chrome.runtime || window.chrome.app));
+        findings.chromeRuntime = { value: hasChromeRuntime, risk: hasChromeRuntime ? 'OK' : 'MEDIUM' };
+
+        // Artefactos CDP pre-116 (cdc_ prefix)
+        const cdcKeys = Object.keys(window).filter(k => k.startsWith('cdc_'));
+        findings.cdpArtifacts = { value: cdcKeys, risk: cdcKeys.length ? 'HIGH' : 'OK' };
+
+        // Playwright / Puppeteer globals
+        findings.playwright = { value: '__playwright' in window || '__pw_manual' in window, risk: ('__playwright' in window || '__pw_manual' in window) ? 'HIGH' : 'OK' };
+        findings.puppeteer  = { value: '__puppeteer_evaluation_script__' in window, risk: ('__puppeteer_evaluation_script__' in window) ? 'HIGH' : 'OK' };
+
+        // Selenium
+        const seleniumKeys = ['selenium','callSelenium','_selenium','__webdriverFunc','webdriver'];
+        const selFound = seleniumKeys.filter(k => k in window);
+        findings.selenium = { value: selFound, risk: selFound.length ? 'HIGH' : 'OK' };
+
+        // Plugins — headless tiene 0 plugins
+        findings.plugins = { value: navigator.plugins.length, risk: navigator.plugins.length === 0 ? 'HIGH' : 'OK' };
+
+        // Languages — debe ser no vacío
+        findings.languages = { value: navigator.languages?.join(','), risk: (!navigator.languages || !navigator.languages.length) ? 'HIGH' : 'OK' };
+
+        // Hardware concurrency — 0 o 1 es sospechoso
+        findings.hardwareConcurrency = { value: navigator.hardwareConcurrency, risk: (navigator.hardwareConcurrency < 2) ? 'MEDIUM' : 'OK' };
+
+        // Device memory
+        findings.deviceMemory = { value: navigator.deviceMemory, risk: (navigator.deviceMemory && navigator.deviceMemory < 1) ? 'MEDIUM' : 'OK' };
+
+        // Notification permission — headless suele retornar 'denied' o 'default' diferente
+        findings.notificationPermission = { value: typeof Notification !== 'undefined' ? Notification.permission : 'undefined', risk: 'INFO' };
+
+        // WebGL renderer — 'SwiftShader' indica GPU virtual (headless típico)
+        let webglRenderer = 'unknown';
+        try {
+          const c = document.createElement('canvas');
+          const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+          if (gl) {
+            const ext = gl.getExtension('WEBGL_debug_renderer_info');
+            webglRenderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'no-ext';
+          }
+        } catch(e) { webglRenderer = 'error'; }
+        const swiftShader = /swiftshader|llvmpipe|virtualbox|vmware/i.test(webglRenderer);
+        findings.webglRenderer = { value: webglRenderer, risk: swiftShader ? 'HIGH' : 'OK' };
+
+        // Function.prototype.toString integridad (Puppeteer la parchea)
+        const toStringStr = Function.prototype.toString.toString();
+        const tampered = !toStringStr.includes('function toString') && !toStringStr.includes('native code');
+        findings.toStringIntegrity = { value: tampered ? 'tampered' : 'native', risk: tampered ? 'MEDIUM' : 'OK' };
+
+        // Resumen
+        const risks = Object.values(findings).map(f => f.risk);
+        const highCount   = risks.filter(r => r === 'HIGH').length;
+        const mediumCount = risks.filter(r => r === 'MEDIUM').length;
+
+        return {
+          overall: highCount > 0 ? 'HIGH_DETECTABLE' : mediumCount > 0 ? 'MEDIUM_DETECTABLE' : 'LIKELY_CLEAN',
+          highRiskSignals: highCount,
+          mediumRiskSignals: mediumCount,
+          findings,
+        };
+      })()`;
+
+      const res = await caller.call('Runtime.evaluate', { expression: expr, returnByValue: true });
+      const data = res?.result?.value;
+
+      return [{ type: 'text', text: JSON.stringify(data, null, 2) }];
+    },
+  };
+
+  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck];
+}
+
+module.exports = { createSecurityTools };

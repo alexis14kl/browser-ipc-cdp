@@ -6,7 +6,7 @@
 function createCookieTools({ caller }) {
   const getCookies = {
     name: 'get_cookies',
-    description: 'Returns cookies for the current page or filtered by URLs.',
+    description: 'Returns cookies for the current page or filtered by URLs. Uses CDP Network.getCookies which operates BELOW the JS sandbox — returns ALL cookies including HttpOnly (inaccessible to document.cookie). Useful for session token extraction in security audits.',
     inputSchema: {
       type: 'object',
       properties: {
