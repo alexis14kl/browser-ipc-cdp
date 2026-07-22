@@ -16,13 +16,16 @@ const { createEmulationTools }    = require('./emulation');
 const { createAccessibilityTools }= require('./accessibility');
 const { createDomTools }          = require('./dom');
 const { createIndexedDbTools }    = require('./indexed-db');
+const { createInterceptTools }    = require('./intercept');
+const { createCdpInterceptor }    = require('../services/cdp-interceptor');
 
 /**
  * @param {{ browserUrl: string, log?: (msg: string) => void }} opts
  * @returns {Array<{ name, description, inputSchema, handler }>}
  */
 function createCustomTools({ browserUrl, log = () => {} }) {
-  const caller = createCdpCaller({ browserUrl });
+  const caller      = createCdpCaller({ browserUrl });
+  const interceptor = createCdpInterceptor({ browserUrl, log });
 
   const tools = [
     ...createCookieTools({ caller }),
@@ -34,6 +37,7 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createAccessibilityTools({ caller }),
     ...createDomTools({ caller }),
     ...createIndexedDbTools({ caller }),
+    ...createInterceptTools({ interceptor }),
   ];
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);
