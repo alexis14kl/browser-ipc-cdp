@@ -6,6 +6,8 @@
  *   detect_third_party_scripts — identificación de scripts de terceros / supply chain
  *   analyze_network_waterfall  — mapa de peticiones, mixed content, dominios sospechosos
  *   stealth_check             — detección de fingerprints de automatización CDP/browser
+ *   bypass_csp  [OFFENSIVE]  — Page.setBypassCSP(true): deshabilita todos los
+ *                              Content-Security-Policy headers del sitio objetivo
  *
  * Nota: get_cookies (via Network.getCookies) ya expone cookies HttpOnly porque CDP
  * opera bajo la sandbox de JS — documentado en su description.
@@ -460,7 +462,80 @@ function createSecurityTools({ caller }) {
     },
   };
 
-  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck];
+  // 5. bypass_csp ─────────────────────────────────────────────────────────────
+  //
+  // Page.setBypassCSP(true) instructs Chrome to ignore ALL CSP directives for the
+  // current page — script-src, default-src, connect-src, everything. After calling
+  // this you can inject inline <script> tags, call eval(), load cross-origin scripts
+  // via DOM manipulation and they will execute without being blocked.
+  //
+  // Scope: persists for the lifetime of the CDP session or until called with
+  // enabled=false. Does NOT survive a hard reload (F5 issues a new document load
+  // but the CDP domain command stays active, so Chrome re-applies the bypass on
+  // the new document automatically while the session is open).
+  //
+  // Note: Runtime.evaluate already bypasses CSP for CDP-injected code (evaluate_script
+  // tool). bypass_csp is needed when the PAYLOAD itself must run in the page context
+  // as a normal inline script — e.g. testing stored XSS execution, injecting a
+  // script tag that loads a C2/collaborator, or chaining DOM-based XSS flows.
+  const bypassCsp = {
+    name: 'bypass_csp',
+    description: 'Enable or disable Chrome\'s CSP enforcement for the current page via Page.setBypassCSP. When enabled, all Content-Security-Policy directives (script-src, connect-src, etc.) are ignored — inline scripts, eval(), and cross-origin loads execute without restriction. Use for XSS payload testing, CSP bypass research, and injecting scripts that must run in the page context rather than via CDP evaluate.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: {
+          type: 'boolean',
+          description: 'true = disable CSP enforcement (offensive). false = restore CSP enforcement. Default: true.',
+        },
+        verify: {
+          type: 'boolean',
+          description: 'After toggling, inject a canary eval() to confirm bypass is active. Default: true.',
+        },
+      },
+    },
+    async handler(args) {
+      const enabled = args.enabled !== false;
+      const verify  = args.verify  !== false;
+
+      await caller.call('Page.setBypassCSP', { enabled });
+
+      let verifyResult = null;
+      if (verify) {
+        // Probe: eval + inline script injection. Both blocked by strict CSP.
+        // If bypass active, both return a value; if not, they throw or return null.
+        const probe = await caller.call('Runtime.evaluate', {
+          expression: `(() => {
+            const canary = { eval: null, inlineScript: null, error: null };
+            try {
+              canary.eval = eval('"csp-bypass-active"');
+            } catch(e) { canary.eval = 'BLOCKED: ' + e.message; }
+            try {
+              const s = document.createElement('script');
+              s.textContent = 'window.__csp_probe = "injected"';
+              document.head.appendChild(s);
+              canary.inlineScript = window.__csp_probe || 'NO_OUTPUT';
+              delete window.__csp_probe;
+            } catch(e) { canary.inlineScript = 'BLOCKED: ' + e.message; }
+            return canary;
+          })()`,
+          returnByValue: true,
+        });
+        verifyResult = probe?.result?.value;
+      }
+
+      const result = {
+        bypassEnabled: enabled,
+        status: enabled ? 'CSP DISABLED — all directives ignored' : 'CSP RESTORED — normal enforcement',
+        note: 'Persists for this CDP session. Hard reload keeps bypass active while session is open.',
+        verification: verifyResult,
+      };
+
+      return [{ type: 'text', text: JSON.stringify(result, null, 2) }];
+    },
+  };
+
+  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck, bypassCsp];
 }
 
 module.exports = { createSecurityTools };
