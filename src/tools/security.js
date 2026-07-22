@@ -10,6 +10,8 @@
  *                              Content-Security-Policy headers del sitio objetivo
  *   spoof_webdriver [OFF]    — Page.addScriptToEvaluateOnNewDocument + Runtime.evaluate
  *                              para ocultar navigator.webdriver antes de cualquier script
+ *   extract_http_only_cookies — Network.getCookies bajo sandbox JS: retorna HttpOnly,
+ *                              clasifica por rol, exporta formato Netscape/curl
  *
  * Nota: get_cookies (via Network.getCookies) ya expone cookies HttpOnly porque CDP
  * opera bajo la sandbox de JS — documentado en su description.
@@ -643,7 +645,114 @@ function createSecurityTools({ caller }) {
     },
   };
 
-  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck, bypassCsp, spoofWebdriver];
+  // 7. extract_http_only_cookies ─────────────────────────────────────────────
+  //
+  // Network.getCookies operates below the JS sandbox — it returns ALL cookies
+  // including HttpOnly (document.cookie filters these out deliberately).
+  // This tool wraps that call with security-focused extras:
+  //   - Filters to httpOnly=true by default
+  //   - Classifies cookies by likely role (session, auth, csrf, tracking)
+  //   - Exports in Netscape/curl format for direct use in other tools
+  //   - Flags cookies without Secure flag on HTTPS pages (misconfiguration)
+  const extractHttpOnlyCookies = {
+    name: 'extract_http_only_cookies',
+    description: 'Extract HttpOnly cookies that are inaccessible to JavaScript via document.cookie. Uses CDP Network.getCookies which bypasses the JS sandbox and returns all cookies including HttpOnly and Secure. Classifies cookies by role (session, auth, CSRF, tracking) and exports in Netscape format for use with curl/Burp/httpx.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        httpOnly: {
+          type: 'boolean',
+          description: 'true = only HttpOnly cookies (default). false = all cookies.',
+        },
+        format: {
+          type: 'string',
+          enum: ['json', 'netscape', 'both'],
+          description: 'Output format. "netscape" = curl/wget cookie file format. Default: both.',
+        },
+        urls: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Filter by specific URLs. Omit to get all cookies for the current page.',
+        },
+      },
+    },
+    async handler(args) {
+      const onlyHttpOnly = args.httpOnly !== false;
+      const format       = args.format || 'both';
+
+      const urlRes = await caller.call('Runtime.evaluate', {
+        expression: 'location.href',
+        returnByValue: true,
+      });
+      const pageUrl  = urlRes?.result?.value || '';
+      const pageHost = (() => { try { return new URL(pageUrl).hostname; } catch { return ''; } })();
+      const isHttps  = pageUrl.startsWith('https:');
+
+      const params = args.urls?.length ? { urls: args.urls } : {};
+      const res    = await caller.call('Network.getCookies', params);
+      let cookies  = res?.cookies || [];
+
+      if (onlyHttpOnly) cookies = cookies.filter(c => c.httpOnly);
+
+      // Classify by cookie name patterns
+      function classify(name) {
+        const n = name.toLowerCase();
+        if (/^(jsessionid|phpsessid|asp\.net_sessionid|connect\.sid|session|sess|sid)/.test(n)) return 'session';
+        if (/^(token|auth|jwt|bearer|access_token|id_token|refresh_token)/.test(n)) return 'auth';
+        if (/(csrf|xsrf|_token|csrftoken)/.test(n)) return 'csrf';
+        if (/^(_ga|_gid|_fbp|_uetsid|_clck|mp_|amplitude)/.test(n)) return 'tracking';
+        if (/(remember|persistent|keep_alive|autologin)/.test(n)) return 'persistent-auth';
+        return 'unknown';
+      }
+
+      const enriched = cookies.map(c => ({
+        name:     c.name,
+        value:    c.value,
+        domain:   c.domain,
+        path:     c.path,
+        httpOnly: c.httpOnly,
+        secure:   c.secure,
+        sameSite: c.sameSite || null,
+        expires:  c.expires > 0 ? new Date(c.expires * 1000).toISOString() : 'session',
+        role:     classify(c.name),
+        warnings: [
+          ...(isHttps && !c.secure ? ['missing Secure flag on HTTPS — cookie can leak over HTTP'] : []),
+          ...(!c.sameSite || c.sameSite === 'None' ? ['SameSite=None or unset — CSRF risk'] : []),
+        ],
+      }));
+
+      // Netscape format: domain  includeSubdomains  path  secure  expiry  name  value
+      const netscape = [
+        '# Netscape HTTP Cookie File',
+        ...enriched.map(c => [
+          c.domain.startsWith('.') ? c.domain : '.' + c.domain,
+          'TRUE',
+          c.path || '/',
+          c.secure ? 'TRUE' : 'FALSE',
+          c.expires === 'session' ? '0' : Math.floor(new Date(c.expires).getTime() / 1000),
+          c.name,
+          c.value,
+        ].join('\t')),
+      ].join('\n');
+
+      const summary = {
+        pageUrl,
+        totalFound:     enriched.length,
+        byRole:         enriched.reduce((acc, c) => { acc[c.role] = (acc[c.role] || 0) + 1; return acc; }, {}),
+        withWarnings:   enriched.filter(c => c.warnings.length).length,
+      };
+
+      const out = {
+        summary,
+        ...(format === 'json'  || format === 'both' ? { cookies: enriched } : {}),
+        ...(format === 'netscape' || format === 'both' ? { netscape } : {}),
+      };
+
+      return [{ type: 'text', text: JSON.stringify(out, null, 2) }];
+    },
+  };
+
+  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck, bypassCsp, spoofWebdriver, extractHttpOnlyCookies];
 }
 
 module.exports = { createSecurityTools };
