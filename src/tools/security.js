@@ -564,31 +564,40 @@ function createSecurityTools({ caller }) {
   // that was registered without touching scripts added by other tools.
   let spoofScriptId = null;
 
+  // Chrome injects navigator.webdriver on the Navigator PROTOTYPE (not instance).
+  // Patching the instance with Object.defineProperty is too late — Chrome re-sets
+  // the prototype accessor after addScriptToEvaluateOnNewDocument runs.
+  // Fix: delete from Navigator.prototype directly, then redefine there.
   const WEBDRIVER_PATCH = `
     (function() {
-      const patch = () => {
+      try {
+        // Primary: delete from prototype where Chrome defines the accessor
+        const proto = Navigator.prototype || navigator.__proto__;
+        delete proto.webdriver;
+        Object.defineProperty(proto, 'webdriver', {
+          get: () => undefined,
+          configurable: true,
+          enumerable: true,
+        });
+      } catch (_) {
         try {
+          // Fallback: define on instance
           Object.defineProperty(navigator, 'webdriver', {
             get: () => undefined,
             configurable: true,
             enumerable: false,
           });
-        } catch (_) {
-          try {
-            delete navigator.webdriver;
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-          } catch (_2) {
-            window.navigator = new Proxy(navigator, {
-              get(t, p) {
-                if (p === 'webdriver') return undefined;
-                const v = t[p];
-                return typeof v === 'function' ? v.bind(t) : v;
-              },
-            });
-          }
+        } catch (_2) {
+          // Last resort: Proxy on window.navigator
+          window.navigator = new Proxy(navigator, {
+            get(t, p) {
+              if (p === 'webdriver') return undefined;
+              const v = t[p];
+              return typeof v === 'function' ? v.bind(t) : v;
+            },
+          });
         }
-      };
-      patch();
+      }
     })();
   `;
 
@@ -890,6 +899,15 @@ function createSecurityTools({ caller }) {
           try { Object.defineProperty(obj, prop, { get: () => val, configurable: true, enumerable: true }); }
           catch(_) {}
         };
+        // webdriver: patch Navigator.prototype so Chrome's re-injection on new
+        // document can't override the instance-level value we set last time.
+        try {
+          const proto = Navigator.prototype || navigator.__proto__;
+          delete proto.webdriver;
+          Object.defineProperty(proto, 'webdriver', { get: () => undefined, configurable: true, enumerable: true });
+        } catch(_) {
+          def(navigator, 'webdriver', undefined);
+        }
         def(navigator, 'vendor',    ${JSON.stringify(vendor)});
         def(navigator, 'language',  ${JSON.stringify(lang)});
         def(navigator, 'languages', ${JSON.stringify(langs)});
