@@ -3,11 +3,13 @@
  *
  * Mantiene una CdpSession persistente y aplica reglas sobre cada request
  * que el navegador pausa (Fetch.requestPaused). Acciones soportadas:
- *   mock     — responde con body/status/headers sintéticos
- *   block    — cancela la request (BlockedByClient)
- *   redirect — reescribe la URL antes de continuar
- *   delay    — espera N ms y continúa
- *   pass     — continúa sin modificar (útil para capturar sin alterar)
+ *   mock            — responde con body/status/headers sintéticos
+ *   block           — cancela la request (BlockedByClient)
+ *   redirect        — reescribe la URL antes de continuar
+ *   delay           — espera N ms y continúa
+ *   pass            — continúa sin modificar (útil para capturar sin alterar)
+ *   add_headers     — inyecta headers extra antes de continuar
+ *   modify_response — intercepta la RESPUESTA del servidor y modifica su body
  *
  * Patrón: factory con DI. Recibe browserUrl y log; devuelve { start, stop,
  * getCaptured, clearCaptured, isActive }. No toca process.* directamente.
@@ -63,7 +65,76 @@ function createCdpInterceptor({ browserUrl, log = () => {} }) {
 
   // ── event handler ─────────────────────────────────────────────────────────
 
+  async function handleResponsePaused(event) {
+    const rule = matchRule(event);
+    if (!rule || rule.action !== 'modify_response') {
+      try { await session.send('Fetch.continueResponse', { requestId: event.requestId }); } catch {}
+      return;
+    }
+
+    try {
+      // Leer body original del servidor
+      let originalBody = '';
+      try {
+        const bodyResult = await session.send('Fetch.getResponseBody', { requestId: event.requestId });
+        originalBody = bodyResult.base64Encoded
+          ? Buffer.from(bodyResult.body, 'base64').toString('utf8')
+          : (bodyResult.body ?? '');
+      } catch {}
+
+      let modifiedBody = originalBody;
+
+      // jsonPatch: { "field.nested": value } — sobreescribe campos del JSON
+      if (rule.jsonPatch && originalBody) {
+        try {
+          const parsed = JSON.parse(originalBody);
+          for (const [path, value] of Object.entries(rule.jsonPatch)) {
+            const keys = path.split('.');
+            let obj = parsed;
+            for (let i = 0; i < keys.length - 1; i++) {
+              if (obj[keys[i]] == null) obj[keys[i]] = {};
+              obj = obj[keys[i]];
+            }
+            obj[keys[keys.length - 1]] = value;
+          }
+          modifiedBody = JSON.stringify(parsed);
+        } catch {}
+      }
+
+      // replaceBody: reemplaza el body entero
+      if (rule.replaceBody !== undefined) {
+        modifiedBody = typeof rule.replaceBody === 'string'
+          ? rule.replaceBody
+          : JSON.stringify(rule.replaceBody);
+      }
+
+      _captured.push({
+        url:    event.request?.url ?? event.url ?? '',
+        method: event.request?.method ?? '',
+        stage:  'response',
+        rule:   rule.name,
+        action: 'modify_response',
+      });
+
+      await session.send('Fetch.fulfillRequest', {
+        requestId:       event.requestId,
+        responseCode:    rule.responseCode ?? event.responseStatusCode ?? 200,
+        responseHeaders: event.responseHeaders ?? [],
+        body:            Buffer.from(modifiedBody).toString('base64'),
+      });
+    } catch (e) {
+      log(`[interceptor] modify_response error: ${e.message}`);
+      try { await session.send('Fetch.continueResponse', { requestId: event.requestId }); } catch {}
+    }
+  }
+
   async function handlePaused(event) {
+    // response-stage: responseStatusCode presente en el evento
+    if (event.responseStatusCode !== undefined) {
+      await handleResponsePaused(event);
+      return;
+    }
+
     const rule = matchRule(event);
 
     _captured.push({
@@ -155,7 +226,10 @@ function createCdpInterceptor({ browserUrl, log = () => {} }) {
     session = createCdpSession({ wsUrl, log });
     await session.connect();
 
-    const patterns = rules.map(r => ({ urlPattern: r.urlPattern, requestStage: 'Request' }));
+    const patterns = rules.map(r => ({
+      urlPattern:   r.urlPattern,
+      requestStage: r.action === 'modify_response' ? 'Response' : 'Request',
+    }));
     await session.send('Fetch.enable', { patterns });
     session.on('Fetch.requestPaused', handlePaused);
 

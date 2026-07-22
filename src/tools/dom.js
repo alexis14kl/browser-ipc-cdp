@@ -59,7 +59,44 @@ function createDomTools({ caller }) {
     },
   };
 
-  return [getDomElement];
+  const scrollTo = {
+    name: 'scroll_to',
+    description: 'Scroll the page to a position or element. Supports smooth and instant behavior.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string',  description: 'CSS selector to scroll into view. Takes priority over x/y.' },
+        x:        { type: 'number',  description: 'Horizontal scroll position in pixels.' },
+        y:        { type: 'number',  description: 'Vertical scroll position in pixels.' },
+        behavior: { type: 'string',  enum: ['smooth', 'instant'], description: 'Scroll behavior. Default: smooth.' },
+        block:    { type: 'string',  enum: ['start', 'center', 'end', 'nearest'], description: 'Vertical alignment when scrolling to selector. Default: center.' },
+      },
+    },
+    async handler(args) {
+      const behavior = args.behavior ?? 'smooth';
+
+      if (args.selector) {
+        const expr = `
+          (function() {
+            const el = document.querySelector(${JSON.stringify(args.selector)});
+            if (!el) return 'Element not found: ${args.selector}';
+            el.scrollIntoView({ behavior: ${JSON.stringify(behavior)}, block: ${JSON.stringify(args.block ?? 'center')} });
+            return 'Scrolled to ' + ${JSON.stringify(args.selector)};
+          })()
+        `;
+        const result = await caller.call('Runtime.evaluate', { expression: expr, returnByValue: true });
+        return [{ type: 'text', text: result.result?.value ?? 'Done' }];
+      }
+
+      const x = args.x ?? 0;
+      const y = args.y ?? 0;
+      const expr = `window.scrollTo({ left: ${x}, top: ${y}, behavior: ${JSON.stringify(behavior)} }); 'Scrolled to x=${x}, y=${y}'`;
+      const result = await caller.call('Runtime.evaluate', { expression: expr, returnByValue: true });
+      return [{ type: 'text', text: result.result?.value ?? 'Done' }];
+    },
+  };
+
+  return [getDomElement, scrollTo];
 }
 
 async function buildElementInfo(caller, nodeId, includeHtml) {

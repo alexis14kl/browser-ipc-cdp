@@ -18,6 +18,7 @@ const { createDomTools }          = require('./dom');
 const { createIndexedDbTools }    = require('./indexed-db');
 const { createInterceptTools }    = require('./intercept');
 const { createAdvancedTools }     = require('./advanced');
+const { createCoverageTools }     = require('./coverage');
 const { createCdpInterceptor }    = require('../services/cdp-interceptor');
 
 /**
@@ -40,6 +41,7 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createIndexedDbTools({ caller }),
     ...createInterceptTools({ interceptor }),
     ...createAdvancedTools({ interceptor }),
+    ...createCoverageTools({ caller }),
   ];
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);

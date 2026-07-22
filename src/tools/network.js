@@ -75,7 +75,43 @@ function createNetworkTools({ caller }) {
     },
   };
 
-  return [emulateNetwork, blockUrls];
+  const clearBrowserCache = {
+    name: 'clear_browser_cache',
+    description: 'Clear the browser HTTP cache. Useful before performance tests or to force fresh resource loads.',
+    inputSchema: { type: 'object', properties: {} },
+    async handler() {
+      await caller.call('Network.enable', {});
+      await caller.call('Network.clearBrowserCache', {});
+      return [{ type: 'text', text: 'Browser cache cleared.' }];
+    },
+  };
+
+  const setExtraHeaders = {
+    name: 'set_extra_headers',
+    description: 'Add extra HTTP headers to every request made by the page. Pass empty object to clear. Simpler alternative to add_auth_header when you need persistent headers without interception.',
+    inputSchema: {
+      type: 'object',
+      required: ['headers'],
+      properties: {
+        headers: {
+          type: 'object',
+          description: 'Key-value pairs of headers to inject. Pass {} to clear all extra headers.',
+          additionalProperties: { type: 'string' },
+        },
+      },
+    },
+    async handler(args) {
+      await caller.call('Network.enable', {});
+      await caller.call('Network.setExtraHTTPHeaders', { headers: args.headers });
+      const count = Object.keys(args.headers).length;
+      const msg = count === 0
+        ? 'Extra headers cleared.'
+        : `Set ${count} extra header(s): ${Object.keys(args.headers).join(', ')}`;
+      return [{ type: 'text', text: msg }];
+    },
+  };
+
+  return [emulateNetwork, blockUrls, clearBrowserCache, setExtraHeaders];
 }
 
 module.exports = { createNetworkTools };
