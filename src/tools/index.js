@@ -14,6 +14,8 @@ const { createStorageTools }      = require('./storage');
 const { createNetworkTools }      = require('./network');
 const { createEmulationTools }    = require('./emulation');
 const { createAccessibilityTools }= require('./accessibility');
+const { createDomTools }          = require('./dom');
+const { createIndexedDbTools }    = require('./indexed-db');
 
 /**
  * @param {{ browserUrl: string, log?: (msg: string) => void }} opts
@@ -30,6 +32,8 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createNetworkTools({ caller }),
     ...createEmulationTools({ caller }),
     ...createAccessibilityTools({ caller }),
+    ...createDomTools({ caller }),
+    ...createIndexedDbTools({ caller }),
   ];
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);
