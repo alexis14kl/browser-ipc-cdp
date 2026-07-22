@@ -2,17 +2,16 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { log, success, warn } = require('../views/logger');
-const { getPlatformId } = require('../platform');
+const { consumerTargetsWsl } = require('../platform');
 
 function getWslHostIp() {
-  const IS_WIN = getPlatformId() === 'win32';
+  // Consumidor nativo (Mac, Linux o Windows nativo sin opt-in): loopback directo.
+  // Evita lanzar wsl.exe en Windows nativo, que abría una consola ajena y podía
+  // colgar hasta 10s. Mismo criterio que needsForwarding() en network.js.
+  if (!consumerTargetsWsl()) return '127.0.0.1';
 
-  // Mac/Linux nativo (sin WSL): localhost directo
-  if (!IS_WIN && !fs.existsSync('/proc/version')) return '127.0.0.1';
-
-  // Windows o WSL: Claude Code SIEMPRE corre en WSL,
-  // asi que SIEMPRE necesitamos la IP del host Windows.
-  // No importa si el usuario ejecuta npx desde Windows o WSL.
+  // Consumidor en WSL (o Windows + BROWSER_IPC_CDP_TARGET=wsl): buscar la IP del
+  // host Windows alcanzable desde la VM.
 
   // 1. Desde WSL: leer resolv.conf directamente
   try {
