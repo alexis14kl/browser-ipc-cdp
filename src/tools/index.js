@@ -20,6 +20,7 @@ const { createInterceptTools }    = require('./intercept');
 const { createAdvancedTools }     = require('./advanced');
 const { createCoverageTools }     = require('./coverage');
 const { createCdpInterceptor }    = require('../services/cdp-interceptor');
+const { createCdpCoverage }       = require('../services/cdp-coverage');
 
 /**
  * @param {{ browserUrl: string, log?: (msg: string) => void }} opts
@@ -28,6 +29,7 @@ const { createCdpInterceptor }    = require('../services/cdp-interceptor');
 function createCustomTools({ browserUrl, log = () => {} }) {
   const caller      = createCdpCaller({ browserUrl });
   const interceptor = createCdpInterceptor({ browserUrl, log });
+  const coverage    = createCdpCoverage({ browserUrl, log });
 
   const tools = [
     ...createCookieTools({ caller }),
@@ -41,7 +43,7 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createIndexedDbTools({ caller }),
     ...createInterceptTools({ interceptor }),
     ...createAdvancedTools({ interceptor }),
-    ...createCoverageTools({ caller }),
+    ...createCoverageTools({ coverage }),
   ];
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);
