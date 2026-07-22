@@ -1,31 +1,20 @@
 const { execSync } = require('child_process');
 const { log, success, warn } = require('../views/logger');
-const { getPlatformId } = require('../platform');
+const { getPlatformId, consumerTargetsWsl } = require('../platform');
 
 const PLATFORM_ID = getPlatformId(); // detección única en src/platform
-const IS_WIN = PLATFORM_ID === 'win32';
 const IS_WSL = PLATFORM_ID === 'wsl';
 
 const FIREWALL_RULE = 'CDP All Ports (IPC)';
 
 /**
- * ¿Hay que montar el reenvío de red (firewall + portproxy)?
- * Solo cuando el consumidor del MCP (Claude Code) corre dentro de WSL y debe
- * alcanzar el navegador que escucha en 127.0.0.1 del host Windows:
- *   - CLI dentro de WSL      → sí (consumidor WSL).
- *   - CLI en Windows nativo  → no, salvo opt-in explícito
- *     BROWSER_IPC_CDP_TARGET=wsl (caso "npx desde Windows pero Claude Code
- *     vive en WSL").
- * En Windows nativo con consumidor nativo la conexión es loopback y no se toca
- * ni el firewall ni el portproxy. El comportamiento en WSL queda idéntico al
- * actual (incluida la elevación de permisos).
+ * ¿Hay que montar el reenvío de red (firewall + portproxy)? Solo cuando el
+ * consumidor del MCP corre en WSL y debe cruzar el borde WSL↔Windows para
+ * alcanzar el navegador en 127.0.0.1 del host. En Windows nativo la conexión es
+ * loopback y no se toca nada. Criterio único: platform/consumerTargetsWsl().
  */
 function needsForwarding() {
-  if (IS_WSL) return true;
-  if (IS_WIN && String(process.env.BROWSER_IPC_CDP_TARGET || '').toLowerCase() === 'wsl') {
-    return true;
-  }
-  return false;
+  return consumerTargetsWsl();
 }
 
 /**
