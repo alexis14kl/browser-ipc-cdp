@@ -12,6 +12,11 @@
  *                              para ocultar navigator.webdriver antes de cualquier script
  *   extract_http_only_cookies — Network.getCookies bajo sandbox JS: retorna HttpOnly,
  *                              clasifica por rol, exporta formato Netscape/curl
+ *   spoof_fingerprint [OFF]  — UA/platform/screen/WebGL spoof multicapa (Emulation
+ *                              CDP + addScriptToEvaluateOnNewDocument). Presets device.
+ *
+ * intercept_and_modify ya cubierto por tools existentes:
+ *   setup_request_interception, mock_api, inject_error, capture_payloads
  *
  * Nota: get_cookies (via Network.getCookies) ya expone cookies HttpOnly porque CDP
  * opera bajo la sandbox de JS — documentado en su description.
@@ -752,7 +757,193 @@ function createSecurityTools({ caller }) {
     },
   };
 
-  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck, bypassCsp, spoofWebdriver, extractHttpOnlyCookies];
+  // 8. spoof_fingerprint ────────────────────────────────────────────────────
+  //
+  // Multi-layer fingerprint spoofing to evade device/browser detection:
+  //
+  //   Layer 1 — Emulation.setUserAgentOverride: patches the UA string sent in
+  //             actual HTTP headers (what the server sees) AND navigator.userAgent
+  //             in JS. Also sets navigator.platform and Accept-Language header.
+  //
+  //   Layer 2 — Emulation.setDeviceMetricsOverride: changes screen dimensions,
+  //             devicePixelRatio and mobile flag (affects window.screen,
+  //             window.devicePixelRatio, matchMedia queries).
+  //
+  //   Layer 3 — Page.addScriptToEvaluateOnNewDocument: patches JS properties
+  //             that CDP overrides don't cover (navigator.vendor, navigator.language,
+  //             navigator.languages, WebGL UNMASKED_RENDERER, screen.colorDepth,
+  //             window.outerWidth/outerHeight).
+  //
+  // Presets are complete, self-consistent profiles. Custom overrides any field.
+  // Call with preset=null + restore=true to reset all overrides.
+
+  const FP_PRESETS = {
+    'mobile-android': {
+      userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+      platform: 'Linux armv8l', vendor: 'Google Inc.',
+      language: 'es-CO', languages: ['es-CO', 'es', 'en-US'],
+      screenWidth: 393, screenHeight: 851, deviceScaleFactor: 2.75, mobile: true,
+      webglRenderer: 'Adreno (TM) 740',
+    },
+    'mobile-ios': {
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+      platform: 'iPhone', vendor: 'Apple Computer, Inc.',
+      language: 'es-CO', languages: ['es-CO', 'es'],
+      screenWidth: 390, screenHeight: 844, deviceScaleFactor: 3, mobile: true,
+      webglRenderer: 'Apple GPU',
+    },
+    'desktop-windows': {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      platform: 'Win32', vendor: 'Google Inc.',
+      language: 'es-CO', languages: ['es-CO', 'es', 'en-US'],
+      screenWidth: 1920, screenHeight: 1080, deviceScaleFactor: 1, mobile: false,
+      webglRenderer: 'ANGLE (NVIDIA GeForce RTX 3060)',
+    },
+    'desktop-mac': {
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      platform: 'MacIntel', vendor: 'Google Inc.',
+      language: 'es-CO', languages: ['es-CO', 'es', 'en-US'],
+      screenWidth: 1440, screenHeight: 900, deviceScaleFactor: 2, mobile: false,
+      webglRenderer: 'ANGLE (Apple M2)',
+    },
+    'desktop-linux': {
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      platform: 'Linux x86_64', vendor: 'Google Inc.',
+      language: 'es-CO', languages: ['es-CO', 'es', 'en-US'],
+      screenWidth: 1920, screenHeight: 1080, deviceScaleFactor: 1, mobile: false,
+      webglRenderer: 'Mesa Intel(R) Iris(R) Xe Graphics',
+    },
+  };
+
+  let fpScriptId = null;
+
+  const spoofFingerprint = {
+    name: 'spoof_fingerprint',
+    description: 'Multi-layer browser fingerprint spoofing: patches navigator.userAgent (HTTP headers + JS), platform, vendor, language, screen dimensions, devicePixelRatio and WebGL renderer. Presets: mobile-android, mobile-ios, desktop-windows, desktop-mac, desktop-linux. Use restore=true to reset all overrides.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        preset: {
+          type: 'string',
+          enum: ['mobile-android', 'mobile-ios', 'desktop-windows', 'desktop-mac', 'desktop-linux'],
+          description: 'Predefined device profile.',
+        },
+        userAgent:         { type: 'string',  description: 'Custom UA string (overrides preset).' },
+        platform:          { type: 'string',  description: 'Custom navigator.platform.' },
+        language:          { type: 'string',  description: 'Custom navigator.language / Accept-Language header.' },
+        screenWidth:       { type: 'number',  description: 'Screen width in CSS pixels.' },
+        screenHeight:      { type: 'number',  description: 'Screen height in CSS pixels.' },
+        deviceScaleFactor: { type: 'number',  description: 'window.devicePixelRatio.' },
+        mobile:            { type: 'boolean', description: 'Emulate mobile device.' },
+        webglRenderer:     { type: 'string',  description: 'Spoof WebGL UNMASKED_RENDERER string.' },
+        restore:           { type: 'boolean', description: 'Remove all overrides and restore real fingerprint.' },
+      },
+    },
+    async handler(args) {
+      // Restore mode
+      if (args.restore) {
+        if (fpScriptId) {
+          try { await caller.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: fpScriptId }); } catch (_) {}
+          fpScriptId = null;
+        }
+        await caller.call('Emulation.clearDeviceMetricsOverride', {});
+        await caller.call('Emulation.setUserAgentOverride', { userAgent: '' });
+        return [{ type: 'text', text: JSON.stringify({ restored: true, status: 'All fingerprint overrides removed' }, null, 2) }];
+      }
+
+      // Merge preset + custom fields
+      const base   = FP_PRESETS[args.preset] || {};
+      const ua     = args.userAgent         ?? base.userAgent         ?? '';
+      const plat   = args.platform          ?? base.platform          ?? '';
+      const lang   = args.language          ?? base.language          ?? 'es-CO';
+      const langs  = base.languages         ?? [lang, 'es', 'en-US'];
+      const vendor = base.vendor            ?? 'Google Inc.';
+      const sw     = args.screenWidth       ?? base.screenWidth       ?? 1920;
+      const sh     = args.screenHeight      ?? base.screenHeight      ?? 1080;
+      const dpr    = args.deviceScaleFactor ?? base.deviceScaleFactor ?? 1;
+      const mob    = args.mobile            ?? base.mobile            ?? false;
+      const wgl    = args.webglRenderer     ?? base.webglRenderer     ?? null;
+
+      // Layer 1: UA override (HTTP headers + navigator.userAgent + navigator.platform)
+      if (ua) {
+        await caller.call('Emulation.setUserAgentOverride', {
+          userAgent:      ua,
+          platform:       plat,
+          acceptLanguage: lang,
+        });
+      }
+
+      // Layer 2: Screen/device metrics
+      await caller.call('Emulation.setDeviceMetricsOverride', {
+        width: sw, height: sh,
+        deviceScaleFactor: dpr,
+        mobile: mob,
+      });
+
+      // Layer 3: JS-level patches via addScriptToEvaluateOnNewDocument
+      if (fpScriptId) {
+        try { await caller.call('Page.removeScriptToEvaluateOnNewDocument', { identifier: fpScriptId }); } catch (_) {}
+      }
+
+      const jsPatches = `(function() {
+        const def = (obj, prop, val) => {
+          try { Object.defineProperty(obj, prop, { get: () => val, configurable: true, enumerable: true }); }
+          catch(_) {}
+        };
+        def(navigator, 'vendor',    ${JSON.stringify(vendor)});
+        def(navigator, 'language',  ${JSON.stringify(lang)});
+        def(navigator, 'languages', ${JSON.stringify(langs)});
+        def(screen, 'width',        ${sw});
+        def(screen, 'height',       ${sh});
+        def(screen, 'availWidth',   ${sw});
+        def(screen, 'availHeight',  ${sh - (mob ? 0 : 40)});
+        def(window, 'outerWidth',   ${sw});
+        def(window, 'outerHeight',  ${sh});
+        ${wgl ? `
+        const _getCtx = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type, ...rest) {
+          const ctx = _getCtx.call(this, type, ...rest);
+          if (ctx && (type === 'webgl' || type === 'experimental-webgl' || type === 'webgl2')) {
+            const _getParam = ctx.getParameter.bind(ctx);
+            ctx.getParameter = function(param) {
+              if (ctx.getExtension) {
+                const ext = ctx.getExtension('WEBGL_debug_renderer_info');
+                if (ext) {
+                  if (param === ext.UNMASKED_RENDERER_WEBGL) return ${JSON.stringify(wgl)};
+                  if (param === ext.UNMASKED_VENDOR_WEBGL)   return ${JSON.stringify(vendor)};
+                }
+              }
+              return _getParam(param);
+            };
+          }
+          return ctx;
+        };` : ''}
+      })();`;
+
+      const reg = await caller.call('Page.addScriptToEvaluateOnNewDocument', { source: jsPatches });
+      fpScriptId = reg?.identifier;
+
+      // Apply JS patches to the current page too
+      await caller.call('Runtime.evaluate', { expression: jsPatches });
+
+      // Verify UA visible to JS
+      const check = await caller.call('Runtime.evaluate', {
+        expression: '({ ua: navigator.userAgent, platform: navigator.platform, vendor: navigator.vendor, language: navigator.language })',
+        returnByValue: true,
+      });
+
+      return [{ type: 'text', text: JSON.stringify({
+        spoofActive: true,
+        preset:      args.preset || 'custom',
+        scriptId:    fpScriptId,
+        applied:     { userAgent: ua, platform: plat, language: lang, screenWidth: sw, screenHeight: sh, deviceScaleFactor: dpr, mobile: mob, webglRenderer: wgl },
+        verification: check?.result?.value,
+        note: 'UA/platform/language effective immediately. Screen dimensions apply on next navigation or resize event.',
+      }, null, 2) }];
+    },
+  };
+
+  return [securityAuditHeaders, detectThirdPartyScripts, analyzeNetworkWaterfall, stealthCheck, bypassCsp, spoofWebdriver, extractHttpOnlyCookies, spoofFingerprint];
 }
 
 module.exports = { createSecurityTools };
