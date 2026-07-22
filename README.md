@@ -241,11 +241,11 @@ Tambien puedes hacerlo a mano en `.mcp.json`:
 
 ### 4. Usar desde Claude Code
 
-Conecta con `/mcp` y tienes **60 tools** listas. Sin config extra.
+Conecta con `/mcp` y tienes **67 tools** listas. Sin config extra.
 
 ---
 
-## 60 Tools — Referencia completa
+## 67 Tools — Referencia completa
 
 > `browser-ipc-cdp` expone el **CDP completo** de Chromium mas herramientas propias.
 > Cada tool trabaja sobre tu navegador **real** con tus sesiones activas.
@@ -299,6 +299,7 @@ Conecta con `/mcp` y tienes **60 tools** listas. Sin config extra.
 |------|----------|
 | `evaluate_script` | Ejecuta JavaScript arbitrario en la pagina |
 | `get_dom_element` | Busca elementos por selector CSS — devuelve atributos, textContent y HTML |
+| `scroll_to` | Scroll a un elemento (selector CSS) o posicion (x/y), smooth o instant |
 | `get_frames` | Lista todos los iframes del documento con su URL y jerarquia |
 | `evaluate_in_frame` | Ejecuta JavaScript dentro de un iframe especifico |
 | `get_accessibility_tree` | Devuelve el arbol de accesibilidad filtrado por rol e importancia |
@@ -337,6 +338,8 @@ Conecta con `/mcp` y tienes **60 tools** listas. Sin config extra.
 | `get_network_request` | Detalla headers, body y timing de una request especifica |
 | `emulate_network` | Simula condiciones de red: offline, 2G, 3G, 4G o custom |
 | `block_urls` | Bloquea requests que coincidan con patrones de URL |
+| `clear_browser_cache` | Limpia el cache HTTP del navegador — fuerza carga fresca |
+| `set_extra_headers` | Agrega headers a TODAS las requests de la pagina (sin intercepcion) |
 | `lighthouse_audit` | Ejecuta una auditoria Lighthouse (performance, SEO, accesibilidad) |
 | `performance_start_trace` | Inicia una traza de performance CDP |
 | `performance_stop_trace` | Detiene la traza y devuelve los datos |
@@ -365,13 +368,26 @@ Conecta con `/mcp` y tienes **60 tools** listas. Sin config extra.
 
 ---
 
+### Cobertura de Codigo
+
+| Tool | Que hace |
+|------|----------|
+| `start_js_coverage` | Inicia coleccion de cobertura JavaScript (que funciones se ejecutaron) |
+| `stop_js_coverage` | Detiene y devuelve resultados — muestra % de cobertura por script |
+| `start_css_coverage` | Inicia tracking de reglas CSS utilizadas |
+| `stop_css_coverage` | Detiene y devuelve reglas CSS no utilizadas — detecta dead CSS |
+
+---
+
 ### Intercepcion de requests
 
 | Tool | Que hace |
 |------|----------|
-| `setup_request_interception` | Activa reglas de intercepcion con acciones: `mock`, `block`, `redirect`, `delay`, `pass`, `add_headers` |
-| `get_intercepted_requests` | Lee todas las requests capturadas con URL, metodo y payload |
+| `setup_request_interception` | Activa reglas de intercepcion. Acciones: `mock`, `block`, `redirect`, `delay`, `pass`, `add_headers`, `modify_response` |
+| `get_intercepted_requests` | Lee todas las requests capturadas con URL, metodo, payload y headers |
 | `clear_request_interception` | Detiene la intercepcion y elimina todas las reglas |
+
+> **`modify_response`** — intercepta la respuesta REAL del servidor y la modifica antes de que llegue al frontend. Usa `jsonPatch` para sobreescribir campos del JSON o `replaceBody` para reemplazar el body entero.
 
 ---
 
@@ -404,10 +420,24 @@ mcp__brave__navigate_page { url: "https://google.com" }
 # Screenshot del estado actual
 mcp__brave__take_screenshot
 
+# Scroll a un elemento
+mcp__brave__scroll_to { selector: "#footer" }
+mcp__brave__scroll_to { y: 1200, behavior: "smooth" }
+
 # Mockear una API para testear sin backend
 mcp__brave__mock_api {
   urlPattern: "*/api/users*",
   responseBody: [{ id: 1, name: "Test User" }]
+}
+
+# Modificar respuesta real del servidor (cambiar role sin tocar backend)
+mcp__brave__setup_request_interception {
+  rules: [{
+    name: "elevate-role",
+    urlPattern: "*/api/me*",
+    action: "modify_response",
+    jsonPatch: { "role": "admin", "permissions.write": true }
+  }]
 }
 
 # Bloquear todo el tracking y ads
@@ -416,8 +446,24 @@ mcp__brave__block_resources { categories: ["analytics", "ads"] }
 # Testear como responde tu UI a un error 500
 mcp__brave__inject_error { urlPattern: "*/api/checkout*", statusCode: 500 }
 
+# Agregar token a todas las requests sin interceptar
+mcp__brave__set_extra_headers { headers: { "Authorization": "Bearer mi-token-aqui" } }
+
 # Simular conexion 3G
 mcp__brave__emulate_network { preset: "3g" }
+
+# Limpiar cache antes de test de performance
+mcp__brave__clear_browser_cache
+
+# Medir cobertura JS de un flujo
+mcp__brave__start_js_coverage
+# ... hacer acciones en la pagina ...
+mcp__brave__stop_js_coverage { minCoverage: 80 }
+
+# Detectar CSS no utilizado
+mcp__brave__start_css_coverage
+# ... navegar la pagina ...
+mcp__brave__stop_css_coverage { unusedOnly: true }
 
 # Exportar la pagina a PDF
 mcp__brave__print_to_pdf { path: "C:/output/reporte.pdf" }
