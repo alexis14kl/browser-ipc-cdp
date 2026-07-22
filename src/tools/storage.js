@@ -73,7 +73,52 @@ function createStorageTools({ caller }) {
     },
   };
 
-  return [getLocalStorage, setLocalStorage, getSessionStorage];
+  const setSessionStorage = {
+    name: 'set_session_storage',
+    description: 'Sets a sessionStorage entry on the current page.',
+    inputSchema: {
+      type: 'object',
+      required: ['key', 'value'],
+      properties: {
+        key:   { type: 'string' },
+        value: { type: 'string' },
+      },
+    },
+    async handler(args) {
+      await caller.call('Runtime.evaluate', {
+        expression:    `sessionStorage.setItem(${JSON.stringify(args.key)}, ${JSON.stringify(args.value)})`,
+        returnByValue: true,
+      });
+      return [{ type: 'text', text: `sessionStorage["${args.key}"] = "${args.value}"` }];
+    },
+  };
+
+  const clearStorage = {
+    name: 'clear_storage',
+    description: 'Clears localStorage, sessionStorage, or both on the current page.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          enum: ['localStorage', 'sessionStorage', 'both'],
+          description: 'Which storage to clear. Default: "both".',
+        },
+      },
+    },
+    async handler(args) {
+      const target = args.target || 'both';
+      const exprs = [];
+      if (target === 'localStorage' || target === 'both') exprs.push('localStorage.clear()');
+      if (target === 'sessionStorage' || target === 'both') exprs.push('sessionStorage.clear()');
+      for (const expr of exprs) {
+        await caller.call('Runtime.evaluate', { expression: expr, returnByValue: true });
+      }
+      return [{ type: 'text', text: `Cleared: ${target}` }];
+    },
+  };
+
+  return [getLocalStorage, setLocalStorage, getSessionStorage, setSessionStorage, clearStorage];
 }
 
 module.exports = { createStorageTools };

@@ -6,11 +6,14 @@
  * mcp-controller.run), por eso la factory llega como parámetro al controller.
  */
 
-const { createCdpCaller }   = require('./_cdp-caller');
-const { createCookieTools } = require('./cookies');
-const { createPdfTools }    = require('./pdf');
-const { createFrameTools }  = require('./frames');
-const { createStorageTools} = require('./storage');
+const { createCdpCaller }         = require('./_cdp-caller');
+const { createCookieTools }       = require('./cookies');
+const { createPdfTools }          = require('./pdf');
+const { createFrameTools }        = require('./frames');
+const { createStorageTools }      = require('./storage');
+const { createNetworkTools }      = require('./network');
+const { createEmulationTools }    = require('./emulation');
+const { createAccessibilityTools }= require('./accessibility');
 
 /**
  * @param {{ browserUrl: string, log?: (msg: string) => void }} opts
@@ -24,6 +27,9 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createPdfTools({ caller }),
     ...createFrameTools({ caller }),
     ...createStorageTools({ caller }),
+    ...createNetworkTools({ caller }),
+    ...createEmulationTools({ caller }),
+    ...createAccessibilityTools({ caller }),
   ];
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);
