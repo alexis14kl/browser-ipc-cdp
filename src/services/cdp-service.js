@@ -61,6 +61,45 @@ async function testCdp(url, timeoutMs = 1500) {
   return null;
 }
 
+/** Targets tipo "page" en /json/list (o [] si falla). */
+async function listPages(baseUrl, timeoutMs = 1500) {
+  try {
+    const list = await fetchJson(`${baseUrl}/json/list`, timeoutMs);
+    return Array.isArray(list) ? list.filter((t) => t && t.type === 'page') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Abre una pestaña vía el endpoint HTTP /json/new. Chromium moderno (>= M111)
+ * exige PUT; los viejos aceptan GET. Resuelve true si el navegador creó la tab.
+ */
+function openNewTab(baseUrl, url = 'about:blank', timeoutMs = 2500) {
+  const target = new URL(`${baseUrl}/json/new?${encodeURIComponent(url)}`);
+  const attempt = (method) => new Promise((resolve, reject) => {
+    const req = http.request(
+      { hostname: target.hostname, port: target.port, path: target.pathname + target.search, method, timeout: timeoutMs },
+      (res) => { res.resume(); res.statusCode === 200 ? resolve(true) : reject(new Error(`HTTP ${res.statusCode}`)); },
+    );
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.end();
+  });
+  return attempt('PUT').catch(() => attempt('GET'));
+}
+
+/**
+ * Garantiza al menos una pestaña manejable. Un navegador puede estar vivo
+ * (/json/version OK) pero con CERO páginas —zombi, o en Mac al cerrar la ventana
+ * el proceso sigue vivo—; entonces chrome-devtools-mcp falla con "No page
+ * selected". Si no hay páginas, crea una con about:blank. Best-effort: nunca lanza.
+ */
+async function ensurePage(baseUrl, timeoutMs = 1500) {
+  if ((await listPages(baseUrl, timeoutMs)).length > 0) return true;
+  try { await openNewTab(baseUrl, 'about:blank'); return true; } catch { return false; }
+}
+
 /** Lee el puerto del archivo DevToolsActivePort de un perfil (o null). */
 function readActivePort(userDataDir) {
   const file = path.join(userDataDir, 'DevToolsActivePort');
@@ -158,23 +197,31 @@ function createCdpService({ platform, log = () => {}, autoLaunch = null }) {
    * Con launch:false no lanza navegador (el handshake MCP no puede esperarlo).
    */
   async function resolve({ launch = true } = {}) {
+    // Auto-cura el caso "navegador vivo pero con 0 páginas" (zombi / ventana
+    // cerrada en Mac): garantiza ≥1 pestaña en el backend antes de devolverlo,
+    // así chrome-devtools-mcp nunca cae en "No page selected".
+    const ensure = async (result) => {
+      if (result) { try { await ensurePage(`http://127.0.0.1:${result.port}`); } catch {} }
+      return result;
+    };
+
     let result = await tryActivePort();
-    if (result) return result;
+    if (result) return ensure(result);
 
     log('DevToolsActivePort miss. Falling back to process discovery.');
     const groups = await platform.discoverCandidatePorts(log);
     for (const group of groups) {
       result = await firstLiveCdp(group.ports, group.label);
-      if (result) return result;
+      if (result) return ensure(result);
     }
 
     if (!launch || !autoLaunch) return null;
     log('No live CDP found. Auto-launching browser.');
     await autoLaunch();
-    return await tryActivePort();
+    return ensure(await tryActivePort());
   }
 
   return { testCdp, readActivePort, discoverProfiles, tryActivePort, firstLiveCdp, resolve };
 }
 
-module.exports = { createCdpService, fetchJson, testCdp, readActivePort };
+module.exports = { createCdpService, fetchJson, testCdp, readActivePort, listPages, openNewTab, ensurePage };
