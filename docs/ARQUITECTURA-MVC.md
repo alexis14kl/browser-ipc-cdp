@@ -211,3 +211,56 @@ pedía el diseño original):
   ambos estados.
 - Los tests que spawnean el launcher real aíslan HOME/USERPROFILE a un
   tmpdir: la suite jamás toca el estado real del usuario.
+
+## 10. Distribución multi-canal — plugin de Claude Code + bundle `.mcpb` (v3.11.0–3.11.1)
+
+Al núcleo (launcher + `cdp-service` + tools) se le sumaron dos canales de
+distribución además de npm, **sin tocar el flujo existente**:
+
+| Canal | Entrada | Config |
+|---|---|---|
+| **npm** (histórico) | `npx browser-ipc-cdp` → `/mcp` | `.mcp.json`/`.claude.json` → ruta fija `~/.browser-ipc-cdp/app` (§8) |
+| **Plugin de Claude Code** | `/plugin marketplace add alexis14kl/browser-ipc-cdp` | `.claude-plugin/{marketplace,plugin}.json` + `mcp-config.json` (`${CLAUDE_PLUGIN_ROOT}/brave_mcp_launcher.js`) |
+| **Claude Desktop** | arrastrar `browser-ipc-cdp.mcpb` | `manifest.json` (spec MCPB 0.3), empaquetado con `mcpb pack` |
+
+Piezas nuevas, todas respetando el patrón factory + DI:
+
+- **Modo bundle** (`BROWSER_IPC_CDP_BUNDLE=1`, seteado por el `manifest`/`mcp-config`):
+  el paquete/plugin ES la unidad de versión, así que el launcher **salta** el aviso
+  de auto-update (§8) e **inyecta las `instructions`** (no hay skill que las aporte).
+  El flujo npx/ruta-fija no lo setea → queda idéntico a como estaba.
+- **Vendor versionado**: `chrome-devtools-mcp` se commitea al repo (whitelist en
+  `.gitignore`: `node_modules/*` + `!node_modules/chrome-devtools-mcp/`) para que el
+  clon del plugin lo traiga → `require.resolve` lo encuentra y corre con el node de
+  la sesión, **sin `npx` en frío**. `npm publish` sigue limpio (el `files` whitelist
+  excluye `node_modules`).
+- **Instrucciones MCP** (`views/mcp-instructions.js`): el `McpStdioProxy` las
+  **anexa** a la respuesta `initialize` (mismo patrón con que ya inyectaba las tools
+  custom en `tools/list`), dándole a Claude Desktop/plugin la guía operativa que en
+  Claude Code (npm) aporta la skill `mcp-brave`.
+
+## 11. ensurePage — el resolver garantiza ≥1 pestaña (v3.11.2)
+
+Síntoma: chrome-devtools-mcp fallaba en bucle con **"No page selected"**. Causa:
+`testCdp` solo validaba `/json/version` (navegador VIVO), nunca que tuviera
+**targets de tipo `page`**. Así la cascada de `resolve()` aceptaba un navegador vivo
+pero con **0 pestañas** —una instancia zombi, o en Mac al cerrar la ventana el
+proceso sigue vivo— y el MCP no tenía página que manejar.
+
+Fix en `cdp-service.js` (misma capa, funciones module-level puras junto a
+`fetchJson`/`testCdp`/`readActivePort`):
+
+| Función | Qué hace |
+|---|---|
+| `listPages(baseUrl)` | Targets `type === 'page'` de `/json/list` (o `[]` si falla). |
+| `openNewTab(baseUrl, url)` | Crea una pestaña vía `/json/new` (PUT en Chromium ≥ M111, con fallback GET). |
+| `ensurePage(baseUrl)` | Si hay ≥1 página no hace nada; si hay 0, crea `about:blank`. Best-effort, nunca lanza. |
+
+`resolve()` llama `ensurePage` sobre el backend resuelto antes de devolverlo (en las
+tres ramas: ActivePort → discovery → auto-launch), vía un helper `ensure` por
+closure. Así el navegador **se auto-cura**: nunca se entrega un backend sin página.
+Beneficia a **ambos canales** (npm y plugin comparten `cdp-service`).
+
+`test-claude/ensure-page.test.js` (4 casos con un HTTP server local que simula
+`/json/list` y `/json/new`): filtra `type=page`, no crea si ya hay, crea con PUT si
+hay 0, cae a GET si PUT devuelve 405.
