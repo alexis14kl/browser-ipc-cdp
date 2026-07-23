@@ -6,6 +6,8 @@
  *   child.stdout  → [proxy] → process.stdout
  *
  * Reglas:
+ *   • initialize request  → marcar id; delegar al hijo
+ *   • initialize response → anexar `instructions` propias antes de enviar
  *   • tools/list request  → marcar id; delegar al hijo
  *   • tools/list response → inyectar tools custom al array antes de enviar
  *   • tools/call custom   → manejar localmente, NO delegar al hijo
@@ -16,11 +18,12 @@
 
 const { createInterface } = require('readline');
 
-function createMcpStdioProxy({ tools, input, output, child, log = () => {} }) {
+function createMcpStdioProxy({ tools, input, output, child, log = () => {}, instructions = '' }) {
   // Lookup rápido por nombre
   const toolMap = new Map(tools.map(t => [t.name, t]));
-  // IDs de tools/list enviados al hijo pendientes de respuesta
+  // IDs de tools/list e initialize enviados al hijo pendientes de respuesta
   const pendingListIds = new Set();
+  const pendingInitIds = new Set();
 
   function writeMsg(stream, obj) {
     stream.write(JSON.stringify(obj) + '\n');
@@ -74,6 +77,11 @@ function createMcpStdioProxy({ tools, input, output, child, log = () => {} }) {
         pendingListIds.add(msg.id);
       }
 
+      // Marcar initialize para anexar instructions propias en la respuesta
+      if (msg.method === 'initialize' && msg.id != null) {
+        pendingInitIds.add(msg.id);
+      }
+
       // Delegar al hijo
       child.stdin.write(JSON.stringify(msg) + '\n');
     });
@@ -96,6 +104,16 @@ function createMcpStdioProxy({ tools, input, output, child, log = () => {} }) {
           })),
         ];
         log(`[mcp-proxy] tools/list: ${msg.result.tools.length} tools (${tools.length} custom)`);
+      }
+
+      // Anexar instructions propias a la respuesta de initialize (sin pisar las
+      // que traiga chrome-devtools-mcp: se concatenan). Es el canal MCP para
+      // que el cliente/modelo sepa CÓMO operar el server.
+      if (instructions && msg.id != null && pendingInitIds.has(msg.id) && msg.result) {
+        pendingInitIds.delete(msg.id);
+        const existing = typeof msg.result.instructions === 'string' ? msg.result.instructions.trim() : '';
+        msg.result.instructions = existing ? `${existing}\n\n${instructions}` : instructions;
+        log(`[mcp-proxy] initialize: instructions inyectadas (${msg.result.instructions.length} chars)`);
       }
 
       writeMsg(output, msg);

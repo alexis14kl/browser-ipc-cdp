@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { createMcpStdioProxy } = require('../services/mcp-stdio-proxy');
 
-function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverlay = null, customToolsFactory = null, env = process.env, argv = process.argv }) {
+function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverlay = null, customToolsFactory = null, instructions = '', env = process.env, argv = process.argv }) {
   function resolveChromeDevtoolsMcpBin() {
     try {
       return require.resolve('chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js');
@@ -130,6 +130,7 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverl
         output: process.stdout,
         child,
         log,
+        instructions,
       });
       proxy.start();
     } else {

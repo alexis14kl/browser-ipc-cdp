@@ -13,5 +13,8 @@ browser_config.json
 cdp_info.json
 node_modules/
 
+# Artefacto del bundle (se sube al GitHub Release, no al repo)
+*.mcpb
+
 # Claude Code local config — nunca al repo público
 .claude/

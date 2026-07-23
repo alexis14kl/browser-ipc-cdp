@@ -1,0 +1,90 @@
+{
+  "manifest_version": "0.3",
+  "name": "browser-ipc-cdp",
+  "display_name": "Browser IPC + CDP (Brave / Chrome / Edge)",
+  "version": "3.11.0",
+  "description": "Controla tu navegador Chromium real (Brave, Chrome o Edge) desde Claude por IPC + CDP dinámico. Un proxy en puerto fijo re-resuelve el puerto real del navegador en cada conexión, así el puerto nunca cambia para el cliente.",
+  "long_description": "Conecta Claude Desktop a tu navegador Chromium REAL (con tus sesiones, cookies y extensiones) por el Chrome DevTools Protocol. El launcher resuelve o auto-lanza el navegador con depuración remota y expone chrome-devtools-mcp detrás de un proxy CDP en puerto fijo (9333 por defecto) que re-resuelve el puerto real en cada conexión: nunca hay que reiniciar el MCP por un cambio de puerto. Incluye ~60 herramientas extra sobre CDP (cookies, storage, red, intercepción, cobertura, PDF, fingerprint/stealth, seguridad) además de las de navegación e interacción de chrome-devtools-mcp.",
+  "author": {
+    "name": "Alexis Malambo",
+    "email": "yilson.malambo@cun.edu.co",
+    "url": "https://github.com/alexis14kl"
+  },
+  "homepage": "https://github.com/alexis14kl/browser-ipc-cdp#readme",
+  "documentation": "https://github.com/alexis14kl/browser-ipc-cdp#readme",
+  "support": "https://github.com/alexis14kl/browser-ipc-cdp/issues",
+  "license": "MIT",
+  "keywords": [
+    "cdp",
+    "chrome-devtools-protocol",
+    "brave",
+    "chrome",
+    "edge",
+    "browser-automation",
+    "mcp"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "brave_mcp_launcher.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/brave_mcp_launcher.js"
+      ],
+      "env": {
+        "BROWSER_IPC_CDP_BUNDLE": "1",
+        "BROWSER_CDP_PROXY_PORT": "${user_config.proxy_port}",
+        "BROWSER_CDP_CURSOR": "${user_config.cursor_overlay}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "tools": [
+    { "name": "list_pages", "description": "Listar las pestañas abiertas del navegador." },
+    { "name": "select_page", "description": "Seleccionar la pestaña activa por id." },
+    { "name": "navigate_page", "description": "Ir a una URL, atrás, adelante o recargar." },
+    { "name": "new_page", "description": "Abrir una pestaña nueva." },
+    { "name": "close_page", "description": "Cerrar una pestaña." },
+    { "name": "take_snapshot", "description": "Leer la página (árbol de accesibilidad con uids). Úsalo antes de interactuar." },
+    { "name": "take_screenshot", "description": "Captura visual de la página." },
+    { "name": "click", "description": "Click en un elemento por uid." },
+    { "name": "fill", "description": "Escribir en un campo por uid." },
+    { "name": "fill_form", "description": "Rellenar varios campos de un formulario." },
+    { "name": "type_text", "description": "Teclear texto carácter a carácter." },
+    { "name": "press_key", "description": "Pulsar una tecla (Enter, Tab, etc.)." },
+    { "name": "evaluate_script", "description": "Ejecutar JavaScript en la página." },
+    { "name": "list_network_requests", "description": "Ver el tráfico de red de la página." },
+    { "name": "list_console_messages", "description": "Leer la consola de la página." },
+    { "name": "get_cookies", "description": "Leer cookies (incluidas HttpOnly vía CDP)." },
+    { "name": "set_cookie", "description": "Crear o modificar una cookie." },
+    { "name": "print_to_pdf", "description": "Exportar la página a PDF." },
+    { "name": "spoof_fingerprint", "description": "Spoofing multicapa de fingerprint (UA, plataforma, pantalla, WebGL)." },
+    { "name": "security_audit_headers", "description": "Auditar las cabeceras de seguridad de la respuesta." }
+  ],
+  "user_config": {
+    "proxy_port": {
+      "type": "number",
+      "title": "Puerto fijo del proxy CDP",
+      "description": "Puerto local estable al que se conecta el MCP (9333 por defecto). Si está ocupado, se prueban los siguientes.",
+      "default": 9333,
+      "required": false
+    },
+    "cursor_overlay": {
+      "type": "boolean",
+      "title": "Mostrar el overlay del cursor de la IA",
+      "description": "Dibuja una flecha azul y ondas en cada click para ver qué toca el agente en la página.",
+      "default": true,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=20.19.0"
+    }
+  }
+}

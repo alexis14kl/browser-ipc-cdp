@@ -33,8 +33,16 @@ const { createCursorOverlay } = require('./src/services/cursor-overlay');
 const { OVERLAY_SOURCE } = require('./src/views/overlay-script');
 const { createMcpController } = require('./src/controllers/mcp-controller');
 const { createCustomTools }   = require('./src/tools');
+const { MCP_INSTRUCTIONS }    = require('./src/views/mcp-instructions');
 
 const { checkForUpdate, installedVersion } = require('./src/services/update');
+
+// Modo bundle = distribución empaquetada (.mcpb de Claude Desktop O plugin de
+// Claude Code), donde el paquete/plugin ES la unidad de versión: no aplica el
+// flujo npx/auto-update ni su aviso, y SÍ se inyectan las instructions (no hay
+// skill). Lo marca BROWSER_IPC_CDP_BUNDLE=1 (manifest del .mcpb o mcp-config.json
+// del plugin). El flujo clásico npx/ruta-fija no lo pone → queda idéntico a hoy.
+const isBundle = process.env.BROWSER_IPC_CDP_BUNDLE === '1';
 
 // MCP stdio: stdout es EXCLUSIVO del JSON-RPC; todo log va a stderr.
 const { log } = createLogger({ stream: process.stderr, prefix: '[brave-mcp] ' });
@@ -43,12 +51,14 @@ const { log } = createLogger({ stream: process.stderr, prefix: '[brave-mcp] ' })
 // handshake): la config apunta a la ruta fija del UpdateService, pero si el
 // usuario aún no re-corrió el instalador tras publicarse una versión nueva,
 // este log es donde la IA (y el humano) se enteran de que corre código viejo.
-log(`browser-ipc-cdp v${installedVersion() || '?'}`);
-checkForUpdate().then((u) => {
-  if (u && u.outdated) {
-    log(`UPDATE disponible: v${u.latest} (corriendo v${u.current}). Ejecuta: npx -y browser-ipc-cdp@latest y reconecta con /mcp`);
-  }
-}).catch(() => {});
+log(`browser-ipc-cdp v${installedVersion() || '?'}${isBundle ? ' (bundle)' : ''}`);
+if (!isBundle) {
+  checkForUpdate().then((u) => {
+    if (u && u.outdated) {
+      log(`UPDATE disponible: v${u.latest} (corriendo v${u.current}). Ejecuta: npx -y browser-ipc-cdp@latest y reconecta con /mcp`);
+    }
+  }).catch(() => {});
+}
 
 const platformId = getPlatformId();
 const cdp = createCdpService({
@@ -60,7 +70,10 @@ const cdp = createCdpService({
 // Overlay del cursor: ENCENDIDO por defecto (opt-out con BROWSER_CDP_CURSOR=0).
 // Así basta con tener la versión instalada — no hay que poner un flag en cada
 // config/proyecto. Best-effort y no bloqueante; quien no lo quiera lo apaga.
-const cursorOverlay = process.env.BROWSER_CDP_CURSOR !== '0'
+// Off si el env es '0' o 'false' (el manifest del bundle mapea el toggle
+// booleano user_config.cursor_overlay → 'true'/'false'). Unset = ON (default).
+const cursorFlag = process.env.BROWSER_CDP_CURSOR;
+const cursorOverlay = (cursorFlag !== '0' && cursorFlag !== 'false')
   ? createCursorOverlay({ resolve: () => cdp.resolve(), log, source: OVERLAY_SOURCE })
   : null;
 
@@ -76,6 +89,10 @@ const controller = createMcpController({
   // Factory de tools custom: recibe browserUrl (conocido en runtime dentro de
   // run()) y devuelve el array de tools a inyectar via McpStdioProxy.
   customToolsFactory: ({ browserUrl }) => createCustomTools({ browserUrl, log }),
+  // Guía operativa que el proxy anexa al `initialize`. SOLO en modo bundle
+  // (.mcpb de Desktop), que no tiene la skill mcp-brave; en Claude Code el
+  // flujo queda idéntico al de hoy (la skill sigue siendo la única fuente).
+  instructions: isBundle ? MCP_INSTRUCTIONS : '',
 });
 
 controller.run().catch((e) => { log(`fatal: ${e.message}`); process.exit(1); });

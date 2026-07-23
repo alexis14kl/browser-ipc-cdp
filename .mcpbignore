@@ -1,0 +1,20 @@
+# Excluir SOLO del nivel raíz del repo (patrones anclados con '/'), para NO
+# tocar node_modules/ — ahí va el vendor (chrome-devtools-mcp), que DEBE
+# viajar dentro del .mcpb. Un patrón sin anclar como 'bin/' también borraría
+# node_modules/chrome-devtools-mcp/build/src/bin/ y rompería el bundle.
+/.git/
+/.github/
+/.claude/
+/test-claude/
+/docs/
+/bin/
+/.gitignore
+/.npmignore
+/.mcpbignore
+/.mcp.json
+/browser_config.json
+/cdp_info.json
+/.DS_Store
+/*.log
+/*.png
+/*.txt

@@ -1,0 +1,15 @@
+{
+  "name": "browser-ipc-cdp",
+  "description": "Control remoto del navegador Chromium real (Brave/Chrome/Edge) desde Claude Code vía IPC + CDP dinámico.",
+  "owner": {
+    "name": "Alexis Malambo",
+    "email": "yilson.malambo@cun.edu.co"
+  },
+  "plugins": [
+    {
+      "name": "browser-ipc-cdp",
+      "source": "./",
+      "description": "Controla tu navegador Chromium real (Brave/Chrome/Edge) desde Claude Code vía IPC + CDP dinámico. Un proxy en puerto fijo re-resuelve el puerto real del navegador en cada conexión."
+    }
+  ]
+}

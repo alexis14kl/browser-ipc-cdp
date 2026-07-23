@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "brave": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/brave_mcp_launcher.js"],
+      "env": {
+        "BROWSER_IPC_CDP_BUNDLE": "1"
+      }
+    }
+  }
+}
