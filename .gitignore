@@ -11,7 +11,10 @@
 __pycache__/
 browser_config.json
 cdp_info.json
-node_modules/
+# Ignora node_modules EXCEPTO el vendor chrome-devtools-mcp: va versionado
+# para que el plugin de Claude Code (clon de git) lo traiga y arranque sin npx.
+node_modules/*
+!node_modules/chrome-devtools-mcp/
 
 # Artefacto del bundle (se sube al GitHub Release, no al repo)
 *.mcpb

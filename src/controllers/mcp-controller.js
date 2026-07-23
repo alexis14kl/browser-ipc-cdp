@@ -31,10 +31,13 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverl
     if (bin && fs.existsSync(bin)) {
       return { cmd: process.execPath, args: [bin] };
     }
+    // Versión PINEADA (no @latest): debe coincidir con la dependencia de
+    // package.json y con el vendor versionado en node_modules. Evita que el
+    // fallback baje una versión mayor incompatible (p. ej. 1.x).
     log(`chrome-devtools-mcp bin not resolvable. Falling back to npx (slow first run).`);
     return isWin
-      ? { cmd: 'cmd.exe', args: ['/c', 'npx', '-y', 'chrome-devtools-mcp@latest'], shell: true }
-      : { cmd: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'], shell: true };
+      ? { cmd: 'cmd.exe', args: ['/c', 'npx', '-y', 'chrome-devtools-mcp@0.25.0'], shell: true }
+      : { cmd: 'npx', args: ['-y', 'chrome-devtools-mcp@0.25.0'], shell: true };
   }
 
   async function startDynamicProxy(initial) {
