@@ -14,6 +14,42 @@ Despues `/mcp` en Claude Code y listo. El wrapper resuelve el puerto dinamico so
 
 ---
 
+## Instalacion
+
+`browser-ipc-cdp` se puede usar de **tres** formas. Elige la que prefieras.
+
+### 1) npm — Claude Code (via npx)
+
+```bash
+npm i browser-ipc-cdp
+npx browser-ipc-cdp
+```
+
+Luego `/mcp` en Claude Code para conectar el server `brave`. El instalador detecta/abre el navegador y configura el `.mcp.json` solo.
+
+### 2) Plugin de Claude Code (desde git, sin npm)
+
+Instalable directo desde este repo:
+
+```
+/plugin marketplace add alexis14kl/browser-ipc-cdp
+/plugin install browser-ipc-cdp@browser-ipc-cdp
+```
+
+Reinicia Claude Code (o corre `/reload-plugins`) para que cargue el MCP del plugin. La primera llamada baja `chrome-devtools-mcp` con npx una sola vez (despues queda cacheado).
+
+### 3) Claude Desktop — extension `.mcpb` (un clic)
+
+1. Descarga `browser-ipc-cdp.mcpb` desde [Releases](https://github.com/alexis14kl/browser-ipc-cdp/releases/latest).
+2. En Claude Desktop: **Ajustes -> Extensiones** -> arrastra el archivo (o doble clic).
+3. Configura el puerto del proxy (9333) y el overlay del cursor, y activa la extension.
+
+Trae `chrome-devtools-mcp` **incluido** (no necesita npm ni npx) y usa el Node que trae Claude Desktop.
+
+> **Nota:** no corras las tres a la vez contra el mismo navegador — todas usan el proxy en el puerto `9333` y colisionarian. Elige una por entorno (o cambia el puerto en la config del bundle/plugin).
+
+---
+
 ## Por que usarlo
 
 - **Mantiene tus sesiones reales**: cookies, 2FA, extensiones, tabs abiertas — nada se pierde
