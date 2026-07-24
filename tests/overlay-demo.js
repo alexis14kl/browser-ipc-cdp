@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Demo manual del cursor-overlay contra el navegador vivo.
- *   node test-claude/overlay-demo.js
+ *   node tests/overlay-demo.js
  * Resuelve el backend real (vía CdpService) e instala el overlay en todas las
  * páginas abiertas. NO es parte de la suite automática (necesita navegador).
  */

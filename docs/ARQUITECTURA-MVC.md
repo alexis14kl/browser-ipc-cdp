@@ -63,7 +63,7 @@ cli.js                         ← delgado: parsea flags → CliController (en l
                                   del plugin lo rechaza el hosting de claude.ai)
 brave_mcp_launcher.js          ← delgado: → McpController (RUTA INTACTA: los
                                   ~/.claude.json de los usuarios apuntan aquí)
-test-claude/                          ← node:test, sin dependencias nuevas
+tests/                          ← node:test, sin dependencias nuevas
 ```
 
 ### Por qué CdpService + PlatformHelper
@@ -168,7 +168,7 @@ cierto del lado CLI.
 
 `browser-detect` ya no exporta `testCdp`/`IS_*` (sin consumidores); su API
 queda en `detectBrowsers/findBrowser/detectExistingCDP/launchBrowser`.
-`test-claude/browser-detect.test.js` cubre las estáticas, el camino
+`tests/browser-detect.test.js` cubre las estáticas, el camino
 DevToolsActivePort de `detectExistingCDP` contra un CDP falso, y dos reglas
 de arquitectura ejecutables: `process.platform` solo se consulta en
 `platform/index.js` y `testCdp` solo se define en `cdp-service.js`.
@@ -190,7 +190,7 @@ Solución — `services/update.js`:
 | `checkForUpdate()` | Compara la versión local contra el registry de npm usando el `fetchJson` de cdp-service (que ganó soporte https). Best-effort: sin red devuelve null, jamás rompe el flujo. El CLI avisa al final; el launcher MCP loguea su versión a stderr al arrancar y avisa si corre código viejo (fire-and-forget, no toca el handshake). |
 | `uninstall()` + `mcp-config.removeBraveConfig()` | `--uninstall` real: borra `~/.browser-ipc-cdp` y quita `mcpServers.brave` de los `.mcp.json`/`.claude.json` conocidos (write atómico, preserva el resto). |
 
-`test-claude/update.test.js` (9 tests): el swap borra lo viejo y deja lo
+`tests/update.test.js` (9 tests): el swap borra lo viejo y deja lo
 nuevo, idempotencia, copia de dependencias hermanas, modo dev, registry falso
 para outdated true/false/null, uninstall y removeBraveEntry con rutas
 explícitas — nunca contra las configs reales de la máquina.
@@ -276,7 +276,7 @@ tres ramas: ActivePort → discovery → auto-launch), vía un helper `ensure` p
 closure. Así el navegador **se auto-cura**: nunca se entrega un backend sin página.
 Beneficia a **ambos canales** (npm y plugin comparten `cdp-service`).
 
-`test-claude/ensure-page.test.js` (4 casos con un HTTP server local que simula
+`tests/ensure-page.test.js` (4 casos con un HTTP server local que simula
 `/json/list` y `/json/new`): filtra `type=page`, no crea si ya hay, crea con PUT si
 hay 0, cae a GET si PUT devuelve 405.
 
@@ -307,6 +307,6 @@ recarga real el complemento es `find_by_text`/`wait_for` sobre el elemento objet
 forms): en vez de snapshot→uid→fill por campo, resuelve por etiqueta y llena el form en
 una llamada, disparando eventos nativos para no romper con inputs controlados por
 frameworks. (4) Se añaden por el proxy (`mcp-stdio-proxy.js` enruta `tools/call` por
-nombre), sin tocar el vendor ni los 4 canales. `test-claude/interact.test.js`: 10 casos
+nombre), sin tocar el vendor ni los 4 canales. `tests/interact.test.js`: 10 casos
 con `caller` mockeado (buscar, clickear en coords, no-op sin match, navigate
 ok/soft-timeout/error, fill simple/lote/sin-args).

@@ -5,7 +5,7 @@
 /.git/
 /.github/
 /.claude/
-/test-claude/
+/tests/
 /docs/
 /cli.js
 /.gitignore
