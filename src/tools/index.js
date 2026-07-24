@@ -15,6 +15,7 @@ const { createNetworkTools }        = require('./network');
 const { createEmulationTools }      = require('./emulation');
 const { createAccessibilityTools }  = require('./accessibility');
 const { createDomTools }            = require('./dom');
+const { createInteractTools }       = require('./interact');
 const { createIndexedDbTools }      = require('./indexed-db');
 const { createInterceptTools }      = require('./intercept');
 const { createAdvancedTools }       = require('./advanced');
@@ -51,6 +52,7 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createEmulationTools({ caller }),
     ...createAccessibilityTools({ caller }),
     ...createDomTools({ caller }),
+    ...createInteractTools({ caller }),
     ...createIndexedDbTools({ caller }),
     ...createInterceptTools({ interceptor }),
     ...createAdvancedTools({ interceptor }),
