@@ -9,7 +9,11 @@
     {
       "name": "browser-ipc-cdp",
       "source": "./",
-      "description": "Controla tu navegador Chromium real (Brave/Chrome/Edge) desde Claude Code vía IPC + CDP dinámico. Un proxy en puerto fijo re-resuelve el puerto real del navegador en cada conexión."
+      "displayName": "Browser IPC + CDP (Brave / Chrome / Edge)",
+      "description": "Controla tu navegador Chromium real (Brave/Chrome/Edge) desde Claude Code vía IPC + CDP dinámico. Un proxy en puerto fijo re-resuelve el puerto real del navegador en cada conexión.",
+      "category": "automation",
+      "keywords": ["cdp", "chrome-devtools-protocol", "brave", "chrome", "edge", "browser-automation", "mcp"],
+      "tags": ["browser-automation", "chrome-devtools-protocol", "cdp", "mcp", "devtools"]
     }
   ]
 }
