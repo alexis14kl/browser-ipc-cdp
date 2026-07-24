@@ -38,7 +38,7 @@ Instalable directo desde este repo:
 
 Reinicia Claude Code (o corre `/reload-plugins`) para que cargue el MCP del plugin. La primera llamada baja `chrome-devtools-mcp` con npx una sola vez (despues queda cacheado).
 
-> **Marketplace en la app de escritorio (en verificacion):** el hosting de plugins de claude.ai rechaza un directorio `bin/` de nivel superior en la raiz del plugin (sus ejecutables entran al PATH del CLI pero no aparecen en la superficie de aprobacion de admin de Desktop). En esta version el CLI se movio a `cli.js` en la raiz (fuera de un `bin/` top-level), manteniendo `source: "./"`, para desbloquear "Agregar marketplace" desde la app de escritorio sin re-hogar ni tocar la arquitectura MVC. Si tu app aun no lo acepta, usa mientras tanto la extension `.mcpb` (opcion 3), que ya funciona.
+Funciona **tanto en el CLI de Claude Code como en la app de escritorio** (Ajustes -> Plugins -> Agregar marketplace, con `alexis14kl/browser-ipc-cdp` o la URL de git). Nota: el hosting de plugins de claude.ai rechaza un directorio `bin/` de nivel superior en la raiz del plugin (sus ejecutables entrarian al PATH sin aparecer en la superficie de aprobacion de admin), por eso el CLI vive en `cli.js` en la raiz y no en `bin/`.
 
 ### 3) Claude Desktop — extension `.mcpb` (un clic)
 

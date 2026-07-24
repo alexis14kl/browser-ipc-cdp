@@ -225,18 +225,18 @@ distribución además de npm, **sin tocar el flujo existente**:
 | **Plugin de Claude Code** | `/plugin marketplace add alexis14kl/browser-ipc-cdp` | `.claude-plugin/{marketplace,plugin}.json` + `mcp-config.json` (`${CLAUDE_PLUGIN_ROOT}/brave_mcp_launcher.js`) |
 | **Claude Desktop** | arrastrar `browser-ipc-cdp.mcpb` | `manifest.json` (spec MCPB 0.3), empaquetado con `mcpb pack` |
 
-> **Marketplace en la app de escritorio (en verificación):** la **app de escritorio** (Ajustes
+> **Marketplace en la app de escritorio (RESUELTO en v3.11.3):** la **app de escritorio** (Ajustes
 > → Plugins → Agregar marketplace) valida en el hosting de claude.ai con un criterio más
 > estricto que rechaza un directorio **`bin/` de nivel superior** en la raíz del plugin (los
 > ejecutables de `bin/` entran al `PATH` del CLI pero no aparecen en la superficie de aprobación
 > de admin de Desktop). Como `source: "./"`, la raíz del repo es la raíz del plugin, así que el
-> antiguo `bin/cli.js` caía dentro. **Fix aplicado (esta rama):** el CLI se movió a `cli.js` en
-> la raíz —el composition root vive en el borde, no en un `bin/`—, eliminando el `bin/` top-level
+> antiguo `bin/cli.js` caía dentro y la sincronización fallaba. **Fix:** el CLI se movió a `cli.js`
+> en la raíz —el composition root vive en el borde, no en un `bin/`—, eliminando el `bin/` top-level
 > **sin re-hogar** y manteniendo `source: "./"` (el vendor sigue en el subárbol → sin arranque
-> en frío en Desktop; `update.js` solo cambió `PACKAGE_FILES: 'bin'→'cli.js'`). Clave: un `bin/`
-> **anidado** (p. ej. `node_modules/chrome-devtools-mcp/build/src/bin/`) NO dispara el validador;
-> solo el top-level. Gate real pendiente: confirmar que la app de escritorio ya acepta «Agregar
-> marketplace». Mientras tanto, la extensión `.mcpb` cubre Desktop.
+> en frío en Desktop; `update.js` solo cambió `PACKAGE_FILES: 'bin'→'cli.js'`). Clave descubierta:
+> un `bin/` **anidado** (p. ej. `node_modules/chrome-devtools-mcp/build/src/bin/`) NO dispara el
+> validador; solo el top-level. **Verificado end-to-end:** «Agregar marketplace» desde la app de
+> escritorio (por `alexis14kl/browser-ipc-cdp` y por URL de git) sincroniza sin error.
 
 Piezas nuevas, todas respetando el patrón factory + DI:
 
