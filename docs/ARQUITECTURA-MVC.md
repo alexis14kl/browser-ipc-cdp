@@ -53,12 +53,14 @@ src/
 │   └── cdp-info-view.js       ← cdp_info.json (vista persistida del estado)
 │
 ├── controllers/
-│   ├── cli-controller.js      ← flujo del instalador (hoy bin/cli.js main())
+│   ├── cli-controller.js      ← flujo del instalador (hoy cli.js main())
 │   └── mcp-controller.js      ← flujo del launcher (resolve rápido sin launch →
 │                                 proxy → warm-up background → spawn MCP)
 │
 index.js                       ← Facade: API pública estable y versionada
-bin/cli.js                     ← delgado: parsea flags → CliController
+cli.js                         ← delgado: parsea flags → CliController (en la
+                                  raíz, NO en bin/: un bin/ top-level en la raíz
+                                  del plugin lo rechaza el hosting de claude.ai)
 brave_mcp_launcher.js          ← delgado: → McpController (RUTA INTACTA: los
                                   ~/.claude.json de los usuarios apuntan aquí)
 test-claude/                          ← node:test, sin dependencias nuevas
@@ -143,7 +145,7 @@ arriba (que se conserva como registro del plan):
 | `models/browser-registry.js` + `models/cdp-endpoint.js` | Consolidado en `services/browser-detect.js` (registry + detección + launch/kill); no hubo carpeta `models/` |
 | `services/runner-factory.js` | Inline en `mcp-controller.js` (`pickRunner`) |
 | `views/console-view.js` | Absorbido por `views/logger.js` + `views/cdp-info-view.js` |
-| `index.js` (Facade) | No se creó: los dos bins (`bin/cli.js`, `brave_mcp_launcher.js`) son la API pública |
+| `index.js` (Facade) | No se creó: los dos bins (`cli.js`, `brave_mcp_launcher.js`) son la API pública |
 | Fase 5 (portar `brave_ipc.py` a JS) | **COMPLETADA**: `auto-launch.js` ahora usa `findBrowser`/`launchBrowser` (JS puro). `brave_ipc.py` y `brave_cdp.bat` eliminados. Única dependencia del proyecto: Node ≥ 20.19 (sin Python) |
 
 Agregado fuera del diseño original: `services/cursor-overlay.js` +
@@ -223,16 +225,18 @@ distribución además de npm, **sin tocar el flujo existente**:
 | **Plugin de Claude Code** | `/plugin marketplace add alexis14kl/browser-ipc-cdp` | `.claude-plugin/{marketplace,plugin}.json` + `mcp-config.json` (`${CLAUDE_PLUGIN_ROOT}/brave_mcp_launcher.js`) |
 | **Claude Desktop** | arrastrar `browser-ipc-cdp.mcpb` | `manifest.json` (spec MCPB 0.3), empaquetado con `mcpb pack` |
 
-> **Pendiente (roadmap) — el marketplace en la app de escritorio:** la fila «Plugin de
-> Claude Code» hoy sincroniza desde el **CLI**. La **app de escritorio** (Ajustes → Plugins
-> → Agregar marketplace) valida en el hosting de claude.ai con un criterio más estricto que
-> rechaza el `bin/` de nivel superior del plugin: como `source: "./"`, la raíz del repo es la
-> raíz del plugin y `bin/cli.js` queda dentro del subárbol. El arreglo —reubicar el plugin a
-> su propio subdirectorio (`source: "./plugins/browser-ipc-cdp"`) con su runtime, dejando
-> `bin/` fuera— se pospuso a propósito: obliga a repuntar `update.js` (§8), el `files`/`bin`
-> de npm, el `manifest` del `.mcpb` y los tests, y no debe hacerse a costa de la arquitectura
-> MVC ni de romper los canales ya funcionales. Mientras tanto, en Claude Desktop la vía es la
-> extensión `.mcpb`, que ya funciona.
+> **Marketplace en la app de escritorio (en verificación):** la **app de escritorio** (Ajustes
+> → Plugins → Agregar marketplace) valida en el hosting de claude.ai con un criterio más
+> estricto que rechaza un directorio **`bin/` de nivel superior** en la raíz del plugin (los
+> ejecutables de `bin/` entran al `PATH` del CLI pero no aparecen en la superficie de aprobación
+> de admin de Desktop). Como `source: "./"`, la raíz del repo es la raíz del plugin, así que el
+> antiguo `bin/cli.js` caía dentro. **Fix aplicado (esta rama):** el CLI se movió a `cli.js` en
+> la raíz —el composition root vive en el borde, no en un `bin/`—, eliminando el `bin/` top-level
+> **sin re-hogar** y manteniendo `source: "./"` (el vendor sigue en el subárbol → sin arranque
+> en frío en Desktop; `update.js` solo cambió `PACKAGE_FILES: 'bin'→'cli.js'`). Clave: un `bin/`
+> **anidado** (p. ej. `node_modules/chrome-devtools-mcp/build/src/bin/`) NO dispara el validador;
+> solo el top-level. Gate real pendiente: confirmar que la app de escritorio ya acepta «Agregar
+> marketplace». Mientras tanto, la extensión `.mcpb` cubre Desktop.
 
 Piezas nuevas, todas respetando el patrón factory + DI:
 

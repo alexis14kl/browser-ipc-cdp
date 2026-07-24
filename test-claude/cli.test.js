@@ -1,15 +1,15 @@
 /**
- * Smoke tests del CLI (bin/cli.js) — solo los flags READ-ONLY, que no tocan
+ * Smoke tests del CLI (cli.js) — solo los flags READ-ONLY, que no tocan
  * el sistema (no lanzan navegador, no escriben firewall/portproxy/.mcp.json).
  * Garantizan que la entrada delgada + CliController + logger inyectable
- * arrancan y responden como el bin/cli.js v2.3.x.
+ * arrancan y responden como el cli.js v2.3.x.
  */
 const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const CLI = path.join(__dirname, '..', 'bin', 'cli.js');
+const CLI = path.join(__dirname, '..', 'cli.js');
 
 function runCli(args) {
   return new Promise((resolve, reject) => {

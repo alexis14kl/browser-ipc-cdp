@@ -38,7 +38,7 @@ Instalable directo desde este repo:
 
 Reinicia Claude Code (o corre `/reload-plugins`) para que cargue el MCP del plugin. La primera llamada baja `chrome-devtools-mcp` con npx una sola vez (despues queda cacheado).
 
-> **Proximamente — este marketplace en la app de escritorio:** por ahora se agrega desde el **CLI de Claude Code**. Agregarlo desde la **app de escritorio** (Ajustes -> Plugins -> Agregar marketplace) todavia no esta disponible: el hosting de plugins de claude.ai rechaza el `bin/` de nivel superior del plugin. Esta en el roadmap reubicar el plugin en su propio subdirectorio sin tocar la arquitectura MVC ni las otras vias. Mientras tanto, en Claude Desktop usa la extension `.mcpb` (opcion 3), que ya funciona.
+> **Marketplace en la app de escritorio (en verificacion):** el hosting de plugins de claude.ai rechaza un directorio `bin/` de nivel superior en la raiz del plugin (sus ejecutables entran al PATH del CLI pero no aparecen en la superficie de aprobacion de admin de Desktop). En esta version el CLI se movio a `cli.js` en la raiz (fuera de un `bin/` top-level), manteniendo `source: "./"`, para desbloquear "Agregar marketplace" desde la app de escritorio sin re-hogar ni tocar la arquitectura MVC. Si tu app aun no lo acepta, usa mientras tanto la extension `.mcpb` (opcion 3), que ya funciona.
 
 ### 3) Claude Desktop — extension `.mcpb` (un clic)
 
@@ -203,7 +203,7 @@ Mejoras v3.0.x:
 
 | Archivo | Funcion |
 |---------|---------|
-| `bin/cli.js` | CLI instalador (`npx browser-ipc-cdp`): detecta/abre el navegador con CDP y configura el MCP |
+| `cli.js` | CLI instalador (`npx browser-ipc-cdp`): detecta/abre el navegador con CDP y configura el MCP |
 | `brave_mcp_launcher.js` | Wrapper MCP que resuelve el puerto dinamico y lanza chrome-devtools-mcp detras del proxy |
 | `src/services/browser-detect.js` | Deteccion y lanzamiento del navegador con CDP (JS puro, cross-platform) |
 | `src/services/auto-launch.js` | Ultimo recurso del MCP: abre el navegador on-demand (JS, sin Python) |

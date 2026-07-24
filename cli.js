@@ -10,8 +10,8 @@
  *   npx browser-ipc-cdp --status         # Ver estado actual
  *   npx browser-ipc-cdp --uninstall      # Desinstalar
  */
-const { createLogger } = require('../src/views/logger');
-const { createCliController } = require('../src/controllers/cli-controller');
+const { createLogger } = require('./src/views/logger');
+const { createCliController } = require('./src/controllers/cli-controller');
 
 const args = process.argv.slice(2);
 const flags = {};

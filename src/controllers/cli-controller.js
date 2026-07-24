@@ -7,7 +7,7 @@
  * las estáticas de cdp-service; este controller solo coordina y usa el
  * logger inyectable (a stdout, porque el CLI no habla protocolo por stdout).
  *
- * Comportamiento 1:1 del bin/cli.js v2.3.x. Flags: --list --status --uninstall
+ * Comportamiento 1:1 del cli.js v2.3.x. Flags: --list --status --uninstall
  * --browser <b> --port <n> --clean.
  */
 const { detectBrowsers, findBrowser, launchBrowser, detectExistingCDP } = require('../services/browser-detect');
