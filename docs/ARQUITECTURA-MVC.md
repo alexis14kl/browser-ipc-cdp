@@ -280,7 +280,7 @@ Beneficia a **ambos canales** (npm y plugin comparten `cdp-service`).
 `/json/list` y `/json/new`): filtra `type=page`, no crea si ya hay, crea con PUT si
 hay 0, cae a GET si PUT devuelve 405.
 
-## 12. Tools token-efficient — interacción por texto y navegación tolerante (v3.12.0)
+## 12. Tools token-efficient — interacción por texto, navegación tolerante y forms (v3.12.0 · `fill_by_label` en v3.13.0)
 
 Motivación (retro de uso real en una app con menú lateral gigante y ~65 formularios):
 el `take_snapshot` del vendor devuelve el árbol de accesibilidad completo —miles de
@@ -289,7 +289,7 @@ por cada acción. Además `navigate_page` lanzaba error al vencer el timeout de 
 aunque la página **sí** cargara (falso negativo → la IA reintenta y quema tokens).
 
 `src/tools/interact.js` (`createInteractTools({ caller })`, mismo patrón factory + DI)
-añade 3 tools que actúan con **una llamada y salida mínima**, todo por el `_cdp-caller`
+añade 4 tools que actúan con **una llamada y salida mínima**, todo por el `_cdp-caller`
 one-shot (sin depender de eventos, que ese caller no escucha):
 
 | Tool | Qué hace | Ahorro |
@@ -297,11 +297,16 @@ one-shot (sin depender de eventos, que ese caller no escucha):
 | `find_by_text` | Un `Runtime.evaluate` que localiza la hoja VISIBLE cuyo texto matchea (contains/exact, filtro por tag); devuelve solo `{text, tag, x, y, id, name}` (tope configurable). | Evita el snapshot completo. |
 | `click_by_text` | Encuentra + `scrollIntoView` + click con `Input.dispatchMouseEvent` en el centro, en **una** tool call. Como el Input viaja por el proxy `:9333`, el `ws-tap` **dibuja el overlay** (§9). | Buscar+clickear sin snapshot ni `uid`, en un round-trip. |
 | `navigate` | `Page.navigate` + **polling de `document.readyState`** hasta `interactive`/`complete` o `timeoutMs`; al vencer devuelve **soft-success** (no lanza). | Mata el falso negativo del timeout. |
+| `fill_by_label` | Resuelve el input por su etiqueta (cascada: `<label for>`/wrapping, `aria-label`, `placeholder`, `name`, `aria-labelledby`) y escribe con el **native value setter** + eventos `input`/`change` (React/Angular lo registran). Acepta un campo o un **lote** (`fields[]`) → un formulario entero en **1** `Runtime.evaluate`. Cubre text/textarea/select/checkbox/radio. | Reemplaza "snapshot → uid → fill" por campo por **1 llamada** para todo el form. |
 
 Notas de diseño: (1) NO producen `uid` del vendor —son una vía paralela por
 coords/selector; la IA usa estos en lugar de `take_snapshot → uid → click`. (2) `navigate`
 usa polling porque el caller one-shot no escucha `Page.loadEventFired`; para SPAs sin
 recarga real el complemento es `find_by_text`/`wait_for` sobre el elemento objetivo.
-(3) Se añaden por el proxy (`mcp-stdio-proxy.js` enruta `tools/call` por nombre), sin
-tocar el vendor ni los 4 canales. `test-claude/interact.test.js`: 7 casos con `caller`
-mockeado (buscar, clickear en coords, no-op sin match, navigate ok/soft-timeout/error).
+(3) `fill_by_label` es la vía token-efficient para formularios (apps con decenas de
+forms): en vez de snapshot→uid→fill por campo, resuelve por etiqueta y llena el form en
+una llamada, disparando eventos nativos para no romper con inputs controlados por
+frameworks. (4) Se añaden por el proxy (`mcp-stdio-proxy.js` enruta `tools/call` por
+nombre), sin tocar el vendor ni los 4 canales. `test-claude/interact.test.js`: 10 casos
+con `caller` mockeado (buscar, clickear en coords, no-op sin match, navigate
+ok/soft-timeout/error, fill simple/lote/sin-args).

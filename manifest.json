@@ -62,7 +62,8 @@
     { "name": "security_audit_headers", "description": "Auditar las cabeceras de seguridad de la respuesta." },
     { "name": "find_by_text", "description": "Localizar elementos por su texto visible SIN snapshot completo (barato en tokens): devuelve texto, tag y coordenadas." },
     { "name": "click_by_text", "description": "Encontrar por texto y hacer click en UNA llamada (sin snapshot ni uid); hace scroll y dibuja el overlay del cursor." },
-    { "name": "navigate", "description": "Navegar tolerante: si el load tarda no falla en falso, devuelve soft-success con el readyState alcanzado." }
+    { "name": "navigate", "description": "Navegar tolerante: si el load tarda no falla en falso, devuelve soft-success con el readyState alcanzado." },
+    { "name": "fill_by_label", "description": "Rellenar campos por su etiqueta visible (uno o varios en lote) en una llamada; dispara input/change nativos para React/Angular." }
   ],
   "user_config": {
     "proxy_port": {

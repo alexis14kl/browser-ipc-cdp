@@ -98,3 +98,41 @@ test('navigate: propaga el error real de Page.navigate (URL inválida)', async (
   assert.match(out[0].text, /Navegación falló: net::ERR_ABORTED/);
   assert.strictEqual(caller.calls.filter((c) => c.method === 'Runtime.evaluate').length, 0, 'no hace polling si la navegación falló');
 });
+
+test('fill_by_label: modo simple (label+value) → un Runtime.evaluate y resumen compacto', async () => {
+  const caller = mockCaller({
+    'Runtime.evaluate': { result: { value: JSON.stringify([{ label: 'Cédula', ok: true, field: 'text' }]) } },
+  });
+  const out = await byName(caller).fill_by_label.handler({ label: 'Cédula', value: '123' });
+
+  assert.strictEqual(caller.calls.length, 1, 'un solo round-trip');
+  assert.match(out[0].text, /Rellenados 1\/1: Cédula✓/);
+});
+
+test('fill_by_label: modo lote → un formulario entero en una llamada, marca los fallos', async () => {
+  const results = [
+    { label: 'Nombre', ok: true, field: 'text' },
+    { label: 'Cédula', ok: true, field: 'text' },
+    { label: 'Correo', ok: false, reason: 'no encontrado' },
+  ];
+  const caller = mockCaller({ 'Runtime.evaluate': { result: { value: JSON.stringify(results) } } });
+  const out = await byName(caller).fill_by_label.handler({
+    fields: [
+      { label: 'Nombre', value: 'Ana' },
+      { label: 'Cédula', value: '123' },
+      { label: 'Correo', value: 'ana@x.com' },
+    ],
+  });
+
+  assert.strictEqual(caller.calls.length, 1, 'los 3 campos en UN solo Runtime.evaluate');
+  assert.match(out[0].text, /Rellenados 2\/3/);
+  assert.match(out[0].text, /Correo✗\(no encontrado\)/);
+});
+
+test('fill_by_label: sin label ni fields → mensaje claro, no toca CDP', async () => {
+  const caller = mockCaller({});
+  const out = await byName(caller).fill_by_label.handler({});
+
+  assert.strictEqual(caller.calls.length, 0);
+  assert.match(out[0].text, /falta/);
+});

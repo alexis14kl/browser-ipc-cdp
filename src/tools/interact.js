@@ -151,7 +151,93 @@ function createInteractTools({ caller }) {
     },
   };
 
-  return [findByText, clickByText, navigate];
+  const fillByLabel = {
+    name: 'fill_by_label',
+    description: 'Rellena campos de formulario por su ETIQUETA visible (o placeholder/aria-label/name), sin snapshot ni uid. Acepta un campo (`label`+`value`) o varios en lote (`fields`) — un formulario entero en UNA llamada. Dispara los eventos input/change nativos para que frameworks (React/Angular) registren el valor. Ideal para apps con muchos formularios.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        label:  { type: 'string', description: 'Etiqueta del campo (modo simple).' },
+        value:  { type: 'string', description: 'Valor a escribir. Para checkbox/radio: "true"/"false".' },
+        fields: {
+          type: 'array',
+          description: 'Modo lote: varios campos en una sola llamada.',
+          items: {
+            type: 'object',
+            required: ['label', 'value'],
+            properties: { label: { type: 'string' }, value: { type: 'string' } },
+          },
+        },
+        exact: { type: 'boolean', description: 'Coincidencia exacta de la etiqueta. Default false (contains).' },
+      },
+    },
+    async handler(args) {
+      const fields = Array.isArray(args.fields) && args.fields.length
+        ? args.fields
+        : (args.label != null ? [{ label: args.label, value: args.value }] : []);
+      if (!fields.length) return [{ type: 'text', text: 'fill_by_label: falta `label`+`value` o `fields[]`.' }];
+
+      const expr = `(function(){
+        var fields=${JSON.stringify(fields)}, exact=${!!args.exact};
+        function norm(s){ return (s||'').replace(/\\s+/g,' ').trim(); }
+        function matches(t,q){ t=norm(t); return exact ? t===norm(q) : t.toLowerCase().indexOf(String(q).toLowerCase())>=0; }
+        function setNativeValue(el,value){
+          var proto = el.tagName==='TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          var d = Object.getOwnPropertyDescriptor(proto,'value');
+          if(d&&d.set) d.set.call(el,value); else el.value=value;
+          el.dispatchEvent(new Event('input',{bubbles:true}));
+          el.dispatchEvent(new Event('change',{bubbles:true}));
+        }
+        function findInput(q){
+          var labels=document.querySelectorAll('label');
+          for(var i=0;i<labels.length;i++){ var lab=labels[i]; if(!matches(lab.textContent,q)) continue;
+            var fid=lab.getAttribute('for'); if(fid){ var e=document.getElementById(fid); if(e) return e; }
+            var inner=lab.querySelector('input,textarea,select'); if(inner) return inner; }
+          var fs=document.querySelectorAll('input,textarea,select');
+          for(var j=0;j<fs.length;j++){ var f=fs[j];
+            if(matches(f.getAttribute('aria-label')||'',q)||matches(f.getAttribute('placeholder')||'',q)||matches(f.getAttribute('name')||'',q)) return f; }
+          for(var k=0;k<fs.length;k++){ var lb=fs[k].getAttribute('aria-labelledby'); if(lb){ var le=document.getElementById(lb); if(le&&matches(le.textContent,q)) return fs[k]; } }
+          return null;
+        }
+        function fillOne(el,value){
+          if(el.tagName==='SELECT'){
+            var opts=Array.prototype.slice.call(el.options);
+            var opt=opts.filter(function(o){ return o.value===value||norm(o.textContent)===norm(String(value))||norm(o.textContent).toLowerCase().indexOf(String(value).toLowerCase())>=0; })[0];
+            if(!opt) return {ok:false, reason:'option no encontrada'};
+            el.value=opt.value; el.dispatchEvent(new Event('change',{bubbles:true})); return {ok:true, field:'select'};
+          }
+          var type=(el.getAttribute('type')||'text').toLowerCase();
+          if(type==='checkbox'||type==='radio'){
+            var want = type==='radio' ? true : (['true','1','on','sí','si','yes'].indexOf(String(value).toLowerCase())>=0);
+            if(el.checked!==want) el.click();
+            return {ok:true, field:type};
+          }
+          try{ el.scrollIntoView({block:'center'}); }catch(e){}
+          try{ el.focus(); }catch(e){}
+          setNativeValue(el,String(value));
+          try{ el.blur(); }catch(e){}
+          return {ok:true, field:type};
+        }
+        var res=[];
+        for(var i=0;i<fields.length;i++){
+          var lbl=fields[i].label, val=fields[i].value;
+          var el=findInput(lbl);
+          if(!el){ res.push({label:lbl, ok:false, reason:'no encontrado'}); continue; }
+          var r=fillOne(el,val); r.label=lbl; res.push(r);
+        }
+        return JSON.stringify(res);
+      })()`;
+
+      const res = await caller.call('Runtime.evaluate', { expression: expr, returnByValue: true });
+      if (res.exceptionDetails) return [{ type: 'text', text: `fill_by_label error: ${res.exceptionDetails.text || 'exception'}` }];
+      const results = JSON.parse(res.result?.value || '[]');
+      const ok = results.filter((r) => r.ok).length;
+      const parts = results.map((r) => `${r.label}${r.ok ? '✓' : `✗(${r.reason || 'error'})`}`);
+      return [{ type: 'text', text: `Rellenados ${ok}/${results.length}: ${parts.join('  ')}` }];
+    },
+  };
+
+  return [findByText, clickByText, navigate, fillByLabel];
 }
 
 module.exports = { createInteractTools };
