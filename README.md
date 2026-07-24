@@ -38,6 +38,8 @@ Instalable directo desde este repo:
 
 Reinicia Claude Code (o corre `/reload-plugins`) para que cargue el MCP del plugin. La primera llamada baja `chrome-devtools-mcp` con npx una sola vez (despues queda cacheado).
 
+> **Proximamente — este marketplace en la app de escritorio:** por ahora se agrega desde el **CLI de Claude Code**. Agregarlo desde la **app de escritorio** (Ajustes -> Plugins -> Agregar marketplace) todavia no esta disponible: el hosting de plugins de claude.ai rechaza el `bin/` de nivel superior del plugin. Esta en el roadmap reubicar el plugin en su propio subdirectorio sin tocar la arquitectura MVC ni las otras vias. Mientras tanto, en Claude Desktop usa la extension `.mcpb` (opcion 3), que ya funciona.
+
 ### 3) Claude Desktop — extension `.mcpb` (un clic)
 
 1. Descarga `browser-ipc-cdp.mcpb` desde [Releases](https://github.com/alexis14kl/browser-ipc-cdp/releases/latest).

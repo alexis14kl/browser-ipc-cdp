@@ -223,6 +223,17 @@ distribución además de npm, **sin tocar el flujo existente**:
 | **Plugin de Claude Code** | `/plugin marketplace add alexis14kl/browser-ipc-cdp` | `.claude-plugin/{marketplace,plugin}.json` + `mcp-config.json` (`${CLAUDE_PLUGIN_ROOT}/brave_mcp_launcher.js`) |
 | **Claude Desktop** | arrastrar `browser-ipc-cdp.mcpb` | `manifest.json` (spec MCPB 0.3), empaquetado con `mcpb pack` |
 
+> **Pendiente (roadmap) — el marketplace en la app de escritorio:** la fila «Plugin de
+> Claude Code» hoy sincroniza desde el **CLI**. La **app de escritorio** (Ajustes → Plugins
+> → Agregar marketplace) valida en el hosting de claude.ai con un criterio más estricto que
+> rechaza el `bin/` de nivel superior del plugin: como `source: "./"`, la raíz del repo es la
+> raíz del plugin y `bin/cli.js` queda dentro del subárbol. El arreglo —reubicar el plugin a
+> su propio subdirectorio (`source: "./plugins/browser-ipc-cdp"`) con su runtime, dejando
+> `bin/` fuera— se pospuso a propósito: obliga a repuntar `update.js` (§8), el `files`/`bin`
+> de npm, el `manifest` del `.mcpb` y los tests, y no debe hacerse a costa de la arquitectura
+> MVC ni de romper los canales ya funcionales. Mientras tanto, en Claude Desktop la vía es la
+> extensión `.mcpb`, que ya funciona.
+
 Piezas nuevas, todas respetando el patrón factory + DI:
 
 - **Modo bundle** (`BROWSER_IPC_CDP_BUNDLE=1`, seteado por el `manifest`/`mcp-config`):
