@@ -77,17 +77,55 @@ function createCdpCaller({ browserUrl, callTimeout = 15000 }) {
     return ws.toString();
   }
 
-  async function getActivePage() {
+  // Lista SOLO pestañas reales (type page, con WS, sin devtools://), ya
+  // reescritas al proxy.
+  async function listPages() {
     const targets = await httpGet(`${browserUrl}/json`);
-    const page = targets.find(t => t.type === 'page');
-    if (!page) return null;
-    return { ...page, webSocketDebuggerUrl: toProxyWs(page.webSocketDebuggerUrl) };
+    return targets
+      .filter(t => t.type === 'page' && t.webSocketDebuggerUrl && !/^devtools:\/\//.test(t.url || ''))
+      .map(t => ({ ...t, webSocketDebuggerUrl: toProxyWs(t.webSocketDebuggerUrl) }));
   }
 
-  async function call(method, params = {}) {
-    const page = await getActivePage();
-    if (!page) throw new Error('No hay página activa en el navegador');
+  /**
+   * Elige la pestaña ACTIVA de una lista sondeada, no la primera del /json.
+   * Tras select_page/bringToFront el navegador deja la elegida como
+   * visibilityState==='visible'; las de fondo quedan 'hidden'. Si el foco de la
+   * ventana está en otra app, hasFocus() cae para todas, por eso 'visible'
+   * manda y 'focused' solo desempata entre varias ventanas visibles.
+   * @param {Array<{page: object, visible: boolean, focused: boolean}>} candidates
+   * @returns {object|null} la page elegida.
+   */
+  function pickActivePage(candidates) {
+    let firstVisible = null;
+    for (const c of candidates) {
+      if (c.visible) {
+        if (c.focused) return c.page;          // visible + enfocada: la mejor
+        if (!firstVisible) firstVisible = c.page;
+      }
+    }
+    return firstVisible || (candidates[0] && candidates[0].page) || null;
+  }
 
+  async function getActivePage() {
+    const pages = await listPages();
+    if (pages.length <= 1) return pages[0] || null; // atajo: 0/1 pestaña, sin sondeo
+    const candidates = [];
+    for (const page of pages) {
+      let info = null;
+      try {
+        const r = await callOn(page, 'Runtime.evaluate', {
+          expression: '({v:document.visibilityState,f:document.hasFocus()})',
+          returnByValue: true,
+        });
+        info = r && r.result && r.result.value;
+      } catch { /* pestaña que no responde: cuenta como no-visible */ }
+      candidates.push({ page, visible: !!(info && info.v === 'visible'), focused: !!(info && info.f) });
+    }
+    return pickActivePage(candidates);
+  }
+
+  // Conecta one-shot a UNA página concreta y ejecuta un método CDP.
+  function callOn(page, method, params = {}) {
     return new Promise((resolve, reject) => {
       const wsUrl = new URL(page.webSocketDebuggerUrl);
       const id = crypto.randomInt(1, 1_000_000_000);
@@ -161,7 +199,14 @@ function createCdpCaller({ browserUrl, callTimeout = 15000 }) {
     });
   }
 
-  return { call, getActivePage };
+  // Ejecuta un método CDP contra la pestaña ACTIVA (visible/enfocada).
+  async function call(method, params = {}) {
+    const page = await getActivePage();
+    if (!page) throw new Error('No hay página activa en el navegador');
+    return callOn(page, method, params);
+  }
+
+  return { call, callOn, getActivePage, listPages, pickActivePage };
 }
 
 module.exports = { createCdpCaller };
