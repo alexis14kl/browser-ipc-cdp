@@ -52,6 +52,10 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverl
         // el proxy los espía (solo-observación) y el overlay los dibuja. El
         // mouse físico del usuario no pasa por aquí → overlay exclusivo de la IA.
         onClientInput: cursorOverlay ? (evt) => { try { cursorOverlay.showAiInput(evt); } catch {} } : undefined,
+        // Vínculos sesión↔target que el navegador anuncia al cliente: alimentan
+        // el bridge para que showAiInput rutee el overlay a la pestaña correcta.
+        onClientAttach: cursorOverlay ? (l) => { try { cursorOverlay.noteClientTarget(l.sessionId, l.targetId); } catch {} } : undefined,
+        onClientDetach: cursorOverlay ? (l) => { try { cursorOverlay.dropClientTarget(l.sessionId); } catch {} } : undefined,
         log,
       });
     } catch (e) {

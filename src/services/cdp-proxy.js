@@ -20,7 +20,7 @@
 const http = require('http');
 const net = require('net');
 const { execFile } = require('child_process');
-const { createInputTap } = require('./ws-tap');
+const { createInputTap, createTargetTap } = require('./ws-tap');
 const { getPlatformId } = require('../platform');
 
 const PROXY_HOST = '127.0.0.1';
@@ -87,11 +87,13 @@ async function reclaimPort(port, log) {
  * @param {{port: number, version: object|null}|null} [opts.initialBackend] - Backend ya resuelto (cache inicial).
  * @param {() => Promise<{port: number, version: object|null}|null>} opts.resolveBackend - Re-resuelve el backend. Debe devolverlo YA verificado (vivo) o null.
  * @param {(backend: {port: number, version: object|null}, proxyPort: number) => void} [opts.onBackendChange] - Se dispara en cada resolución exitosa (incluido el backend inicial).
- * @param {(evt: {type: string, x: number, y: number, button?: string}) => void} [opts.onClientInput] - Se dispara por cada Input.dispatchMouseEvent que el cliente (chrome-devtools-mcp) manda por el túnel. SOLO-OBSERVACIÓN.
+ * @param {(evt: {type: string, x: number, y: number, button?: string, sessionId?: string}) => void} [opts.onClientInput] - Se dispara por cada Input.dispatchMouseEvent que el cliente (chrome-devtools-mcp) manda por el túnel. SOLO-OBSERVACIÓN.
+ * @param {(link: {sessionId: string, targetId: string}) => void} [opts.onClientAttach] - Vínculo sesión↔target que el navegador anuncia al cliente (Target.attachedToTarget, type page). Permite rutear el overlay a la pestaña correcta.
+ * @param {(link: {sessionId: string}) => void} [opts.onClientDetach] - El cliente soltó una pestaña (Target.detachedFromTarget).
  * @param {(msg: string) => void} opts.log
  * @returns {Promise<{port: number, server: import('http').Server}>}
  */
-async function startProxy({ preferredPort, initialBackend = null, resolveBackend, onBackendChange, onClientInput, log, maxPortAttempts = 10 }) {
+async function startProxy({ preferredPort, initialBackend = null, resolveBackend, onBackendChange, onClientInput, onClientAttach, onClientDetach, log, maxPortAttempts = 10 }) {
   let listenPort = null;
   let backend = initialBackend;
   let resolving = null;
@@ -200,6 +202,13 @@ async function startProxy({ preferredPort, initialBackend = null, resolveBackend
         if (onClientInput) {
           const tap = createInputTap(onClientInput);
           socket.on('data', (c) => { try { tap(c); } catch {} });
+        }
+        // Tap del sentido opuesto (backend→cliente): los eventos Target.*
+        // viajan del navegador AL cliente, por eso se espían aquí y no en
+        // socket. Da el mapa sessionId↔targetId para rutear el overlay.
+        if (onClientAttach || onClientDetach) {
+          const targetTap = createTargetTap({ onAttach: onClientAttach, onDetach: onClientDetach });
+          backend.on('data', (c) => { try { targetTap(c); } catch {} });
         }
         socket.pipe(backend);
         backend.pipe(socket);

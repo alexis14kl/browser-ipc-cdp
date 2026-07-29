@@ -43,15 +43,35 @@ async function fakeBrowser() {
       'Connection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n'
     );
     sock = socket;
+    // Reensambla frames: varios comandos CDP pueden llegar coalescidos en un
+    // solo chunk TCP (p.ej. dos páginas inyectando a la vez). Sin este bucle se
+    // decodificaría solo el primero y los demás se perderían → inyección colgada.
+    let acc = Buffer.alloc(0);
     socket.on('data', (buf) => {
-      const msg = decodeFrame(buf);
-      if (!msg) return;
-      try {
-        const obj = JSON.parse(msg);
-        received.push(obj);
-        // Responder el comando (resultado vacío) para no colgar al cliente.
-        sendFrame(socket, JSON.stringify({ id: obj.id, result: {} }));
-      } catch {}
+      acc = Buffer.concat([acc, buf]);
+      for (;;) {
+        if (acc.length < 2) break;
+        let payloadLen = acc[1] & 127;
+        let headerLen = 2;
+        if (payloadLen === 126) {           // longitud extendida de 16 bits
+          if (acc.length < 4) break;
+          payloadLen = acc.readUInt16BE(2);
+          headerLen = 4;
+        }
+        const maskLen = (acc[1] & 128) ? 4 : 0;
+        const total = headerLen + maskLen + payloadLen;
+        if (acc.length < total) break; // frame incompleto: esperar más chunks
+        const frame = acc.subarray(0, total);
+        acc = acc.subarray(total);
+        const msg = decodeFrame(frame);
+        if (!msg) continue;
+        try {
+          const obj = JSON.parse(msg);
+          received.push(obj);
+          // Responder el comando (resultado vacío) para no colgar al cliente.
+          sendFrame(socket, JSON.stringify({ id: obj.id, result: {} }));
+        } catch {}
+      }
     });
     socket.on('error', () => {});
   });
@@ -62,10 +82,10 @@ async function fakeBrowser() {
     wsUrl: `ws://127.0.0.1:${port}/devtools/browser/fake`,
     received,
     // Simula que apareció una pestaña → el cliente debe inyectar el overlay.
-    emitPage(sessionId = 'sess-1') {
+    emitPage(sessionId = 'sess-1', targetId = 't1') {
       sendFrame(sock, JSON.stringify({
         method: 'Target.attachedToTarget',
-        params: { sessionId, targetInfo: { type: 'page', targetId: 't1' } },
+        params: { sessionId, targetInfo: { type: 'page', targetId } },
       }));
     },
     dropConnection() { try { sock.destroy(); } catch {} },
@@ -190,6 +210,82 @@ test('overlay: se reconecta solo si la conexión CDP cae', { skip: NO_WS }, asyn
       { timeoutMs: 5000 }
     );
     assert.ok(reconnected, 'no se reconectó tras caer la conexión');
+  } finally {
+    overlay.close();
+    await browser.close();
+  }
+});
+
+test('overlay: rutea el click SOLO a la pestaña que la IA usa (no broadcast)', { skip: NO_WS }, async () => {
+  const browser = await fakeBrowser();
+  const overlay = createCursorOverlay({
+    resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: browser.wsUrl } }),
+    log: () => {},
+    source: OVERLAY_SOURCE,
+  });
+  try {
+    overlay.start();
+    await waitFor(() => browser.received.some((m) => m.method === 'Target.setAutoAttach'), { timeoutMs: 4000 });
+
+    // Dos pestañas: sesión-overlay OV_A↔targetId TA, OV_B↔TB.
+    browser.emitPage('OV_A', 'TA');
+    browser.emitPage('OV_B', 'TB');
+    await waitFor(() => {
+      const a = browser.received.some((m) => m.sessionId === 'OV_A' && m.method === 'Runtime.evaluate');
+      const b = browser.received.some((m) => m.sessionId === 'OV_B' && m.method === 'Runtime.evaluate');
+      return a && b; // ambas inyectadas
+    }, { timeoutMs: 4000 });
+
+    // El cliente (chrome-devtools-mcp) opera la pestaña TA con SU sesión CL_A.
+    overlay.noteClientTarget('CL_A', 'TA');
+
+    const before = browser.received.length;
+    // Click de la IA llega con el sessionId del CLIENTE.
+    overlay.showAiInput({ type: 'mousePressed', x: 11, y: 22, sessionId: 'CL_A' });
+
+    await waitFor(() => browser.received.slice(before).some(
+      (m) => m.method === 'Runtime.evaluate' && /__clAiPointer/.test(m.params?.expression || '')
+    ), { timeoutMs: 3000 });
+
+    const pointerMsgs = browser.received.slice(before).filter(
+      (m) => m.method === 'Runtime.evaluate' && /__clAiPointer/.test(m.params?.expression || '')
+    );
+    assert.strictEqual(pointerMsgs.length, 1, 'debe dibujar en UNA sola sesión');
+    assert.strictEqual(pointerMsgs[0].sessionId, 'OV_A', 'debe rutear a la pestaña de la IA (TA→OV_A)');
+    assert.ok(!pointerMsgs.some((m) => m.sessionId === 'OV_B'), 'no debe tocar la otra pestaña');
+  } finally {
+    overlay.close();
+    await browser.close();
+  }
+});
+
+test('overlay: sin vínculo cliente cae a broadcast (degradación segura)', { skip: NO_WS }, async () => {
+  const browser = await fakeBrowser();
+  const overlay = createCursorOverlay({
+    resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: browser.wsUrl } }),
+    log: () => {},
+    source: OVERLAY_SOURCE,
+  });
+  try {
+    overlay.start();
+    await waitFor(() => browser.received.some((m) => m.method === 'Target.setAutoAttach'), { timeoutMs: 4000 });
+    browser.emitPage('OV_A', 'TA');
+    browser.emitPage('OV_B', 'TB');
+    await waitFor(() => ['OV_A', 'OV_B'].every((s) =>
+      browser.received.some((m) => m.sessionId === s && m.method === 'Runtime.evaluate')), { timeoutMs: 4000 });
+
+    const before = browser.received.length;
+    // Sin sessionId conocido → no hay vínculo → broadcast a ambas.
+    overlay.showAiInput({ type: 'mousePressed', x: 5, y: 6, sessionId: 'DESCONOCIDA' });
+
+    await waitFor(() => browser.received.slice(before).filter(
+      (m) => m.method === 'Runtime.evaluate' && /__clAiPointer/.test(m.params?.expression || '')
+    ).length >= 2, { timeoutMs: 3000 });
+
+    const sessions = new Set(browser.received.slice(before)
+      .filter((m) => m.method === 'Runtime.evaluate' && /__clAiPointer/.test(m.params?.expression || ''))
+      .map((m) => m.sessionId));
+    assert.ok(sessions.has('OV_A') && sessions.has('OV_B'), 'fallback debe alcanzar ambas pestañas');
   } finally {
     overlay.close();
     await browser.close();

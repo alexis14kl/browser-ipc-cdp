@@ -1,6 +1,11 @@
+'use strict';
+
+const { SessionTargetBridge } = require('./session-target-bridge');
+
 /**
  * Cursor Overlay Service — auto-inyecta la vista del cursor (overlay-script)
- * en TODAS las páginas del navegador vía CDP, sin pasos manuales.
+ * en las páginas del navegador vía CDP, sin pasos manuales, y rutea cada click
+ * de la IA a la pestaña que realmente está usando (vía SessionTargetBridge).
  *
  * Abre su propio WebSocket al endpoint browser-level del navegador y:
  *   - Page.addScriptToEvaluateOnNewDocument → el overlay corre al inicio de
@@ -17,8 +22,9 @@
  * @param {() => Promise<{port:number, version:object}|null>} deps.resolve  CdpService.resolve
  * @param {(msg: string) => void} [deps.log]
  * @param {string} deps.source  El JS del overlay (OVERLAY_SOURCE).
+ * @param {SessionTargetBridge} [deps.bridge]  Traductor sessionId_cliente↔overlay.
  */
-function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }) {
+function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000, bridge = new SessionTargetBridge() }) {
   let ws = null;
   let nextId = 1;
   const pending = new Map();       // id → resolve
@@ -78,10 +84,22 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
       p.resolve(msg.result);
       return;
     }
-    // Sesión adjuntada a un target page → inyectar
+    // Sesión adjuntada a un target page → registrar el vínculo y inyectar.
     if (msg.method === 'Target.attachedToTarget') {
       const { sessionId, targetInfo } = msg.params;
-      if (targetInfo.type === 'page') injectInto(sessionId);
+      if (targetInfo && targetInfo.type === 'page') {
+        // Vincula ESTA sesión-overlay con el targetId global: es lo que luego
+        // permite rutear el click (que llega con el sessionId del cliente).
+        bridge.linkOverlay(sessionId, targetInfo.targetId);
+        injectInto(sessionId);
+      }
+    } else if (msg.method === 'Target.detachedFromTarget') {
+      // La pestaña se cerró: soltar la sesión para no rutear a un target muerto.
+      const { sessionId } = msg.params;
+      if (sessionId) {
+        injectedSessions.delete(sessionId);
+        bridge.unlinkOverlay(sessionId);
+      }
     }
   }
 
@@ -117,6 +135,7 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
     ws.addEventListener('message', (ev) => onMessage(ev.data));
     ws.addEventListener('close', () => {
       injectedSessions.clear();
+      bridge.clearOverlay();        // las sesiones-overlay ya no existen; el lado cliente lo mantiene el proxy
       failAllPending('ws cerrado'); // libera los await colgados
       ws = null;
       scheduleRetry(); // Brave cerró/reinició → reconectar y reinstalar
@@ -131,8 +150,15 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
     }
   }
 
-  // Dibuja un click de la IA en todas las páginas inyectadas. Lo alimenta el
-  // tap del proxy (Input.dispatchMouseEvent) — es la señal exclusiva de la IA.
+  function draw(expr, sessionId) {
+    send('Runtime.evaluate', { expression: expr, includeCommandLineAPI: false }, sessionId).catch(() => {});
+  }
+
+  // Dibuja un click de la IA. Lo alimenta el tap del proxy
+  // (Input.dispatchMouseEvent) — es la señal exclusiva de la IA.
+  // Rutea a la ÚNICA página que la IA está usando: el evt trae el sessionId del
+  // cliente, que el bridge traduce (vía targetId) a la sesión-overlay de esa
+  // misma pestaña. Sin vínculo conocido, cae a broadcast (degradación segura).
   // Fire-and-forget; los mouseMoved se estrangulan para no inundar el WS.
   function showAiInput(evt) {
     if (!ws || !evt || injectedSessions.size === 0) return;
@@ -147,10 +173,21 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
     const x = Math.round(evt.x || 0);
     const y = Math.round(evt.y || 0);
     const expr = `window.__clAiPointer&&window.__clAiPointer(${JSON.stringify(type)},${x},${y})`;
-    for (const sessionId of injectedSessions) {
-      send('Runtime.evaluate', { expression: expr, includeCommandLineAPI: false }, sessionId).catch(() => {});
+
+    const overlaySession = bridge.resolveOverlaySession(evt.sessionId);
+    if (overlaySession && injectedSessions.has(overlaySession)) {
+      draw(expr, overlaySession);   // ruteo preciso: solo la pestaña activa
+      return;
     }
+    // Fallback: sin vínculo (frame sin sessionId, o attach aún no visto) →
+    // broadcast como antes, para no perder el feedback visual.
+    for (const sessionId of injectedSessions) draw(expr, sessionId);
   }
+
+  // Alimentan el lado CLIENTE del bridge desde el tap del proxy (conexión CDP
+  // independiente): así showAiInput puede traducir su sessionId a la pestaña.
+  function noteClientTarget(sessionId, targetId) { bridge.linkClient(sessionId, targetId); }
+  function dropClientTarget(sessionId) { bridge.unlinkClient(sessionId); }
 
   // Arranca el overlay: no bloquea (best-effort). Se auto-mantiene vía retries.
   function start() {
@@ -166,7 +203,9 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000 }
   }
 
   // `run` se conserva como alias de un intento único (lo usa el demo).
-  return { start, run: connect, close, showAiInput };
+  // `bridge` se expone para tests/observabilidad; noteClientTarget/dropClientTarget
+  // los cablea el controller desde el tap del proxy.
+  return { start, run: connect, close, showAiInput, noteClientTarget, dropClientTarget, bridge };
 }
 
 module.exports = { createCursorOverlay };

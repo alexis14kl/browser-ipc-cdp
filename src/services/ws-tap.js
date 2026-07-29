@@ -77,7 +77,9 @@ function createWsFrameDecoder(onText) {
 
 /**
  * Tap especializado: decodifica frames y emite SOLO los mouse-input de la IA.
- * @param {(evt: {type: string, x: number, y: number, button?: string}) => void} onInput
+ * Incluye el `sessionId` del comando (top-level en modo flatten): es la marca
+ * de QUÉ pestaña recibe el click, imprescindible para rutear el overlay.
+ * @param {(evt: {type: string, x: number, y: number, button?: string, sessionId?: string}) => void} onInput
  * @returns {(chunk: Buffer) => void} feed
  */
 function createInputTap(onInput) {
@@ -88,8 +90,40 @@ function createInputTap(onInput) {
     if (!msg || msg.method !== 'Input.dispatchMouseEvent' || !msg.params) return;
     const p = msg.params;
     if (typeof p.x !== 'number' || typeof p.y !== 'number') return;
-    onInput({ type: p.type, x: p.x, y: p.y, button: p.button });
+    onInput({ type: p.type, x: p.x, y: p.y, button: p.button, sessionId: msg.sessionId });
   });
 }
 
-module.exports = { createWsFrameDecoder, createInputTap };
+/**
+ * Tap del stream backend→cliente: emite los vínculos sesión↔target que el
+ * navegador ANUNCIA (Target.attachedToTarget / Target.detachedFromTarget). Es
+ * la pieza que traduce un sessionId del cliente a un targetId global — sin
+ * esto no se puede saber a qué pestaña pertenece cada click.
+ *
+ * Solo interesan los targets de tipo "page" (los que el overlay inyecta).
+ * @param {object} handlers
+ * @param {(link: {sessionId: string, targetId: string}) => void} [handlers.onAttach]
+ * @param {(link: {sessionId: string}) => void} [handlers.onDetach]
+ * @returns {(chunk: Buffer) => void} feed
+ */
+function createTargetTap({ onAttach, onDetach } = {}) {
+  return createWsFrameDecoder((text) => {
+    // fast-path: la inmensa mayoría de frames no son eventos de Target.
+    if (text.indexOf('Target.attachedToTarget') === -1 &&
+        text.indexOf('Target.detachedFromTarget') === -1) return;
+    let msg;
+    try { msg = JSON.parse(text); } catch { return; }
+    if (!msg || !msg.params) return;
+    if (msg.method === 'Target.attachedToTarget') {
+      const { sessionId, targetInfo } = msg.params;
+      if (onAttach && sessionId && targetInfo && targetInfo.type === 'page' && targetInfo.targetId) {
+        onAttach({ sessionId, targetId: targetInfo.targetId });
+      }
+    } else if (msg.method === 'Target.detachedFromTarget') {
+      const { sessionId } = msg.params;
+      if (onDetach && sessionId) onDetach({ sessionId });
+    }
+  });
+}
+
+module.exports = { createWsFrameDecoder, createInputTap, createTargetTap };
