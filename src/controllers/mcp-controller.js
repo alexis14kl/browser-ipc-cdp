@@ -36,8 +36,8 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverl
     // fallback baje una versión mayor incompatible (p. ej. 1.x).
     log(`chrome-devtools-mcp bin not resolvable. Falling back to npx (slow first run).`);
     return isWin
-      ? { cmd: 'cmd.exe', args: ['/c', 'npx', '-y', 'chrome-devtools-mcp@0.25.0'], shell: true }
-      : { cmd: 'npx', args: ['-y', 'chrome-devtools-mcp@0.25.0'], shell: true };
+      ? { cmd: 'cmd.exe', args: ['/c', 'npx', '-y', 'chrome-devtools-mcp@1.6.0'], shell: true }
+      : { cmd: 'npx', args: ['-y', 'chrome-devtools-mcp@1.6.0'], shell: true };
   }
 
   async function startDynamicProxy(initial) {
