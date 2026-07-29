@@ -126,4 +126,18 @@ function createTargetTap({ onAttach, onDetach } = {}) {
   });
 }
 
-module.exports = { createWsFrameDecoder, createInputTap, createTargetTap };
+/**
+ * Extrae el targetId de una URL de upgrade WS de página (`/devtools/page/<id>`).
+ * Los tools custom (via _cdp-caller) se conectan por-página a ese endpoint y
+ * mandan Input SIN sessionId; el id de la ruta es la pestaña dueña del túnel y
+ * permite rutear el overlay sin depender del sessionId.
+ * @param {string} url
+ * @returns {string|null} targetId o null si no es un endpoint de página.
+ */
+function pageTargetIdFromUrl(url) {
+  if (!url) return null;
+  const m = /\/devtools\/page\/([^/?#]+)/.exec(url);
+  return m ? m[1] : null;
+}
+
+module.exports = { createWsFrameDecoder, createInputTap, createTargetTap, pageTargetIdFromUrl };

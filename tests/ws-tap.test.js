@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { createWsFrameDecoder, createInputTap, createTargetTap } = require('../src/services/ws-tap');
+const { createWsFrameDecoder, createInputTap, createTargetTap, pageTargetIdFromUrl } = require('../src/services/ws-tap');
 
 // Construye un frame WS de texto server→client (SIN máscara), como los eventos
 // que el navegador manda al cliente (Target.attachedToTarget, etc.).
@@ -96,6 +96,14 @@ test('createTargetTap ignora frames que no son eventos de Target', () => {
   const feed = createTargetTap({ onAttach: (l) => attaches.push(l) });
   feed(unmaskedTextFrame(JSON.stringify({ id: 9, result: {} })));
   assert.deepStrictEqual(attaches, []);
+});
+
+test('pageTargetIdFromUrl extrae el targetId del endpoint de página', () => {
+  assert.strictEqual(pageTargetIdFromUrl('/devtools/page/ABC123'), 'ABC123');
+  assert.strictEqual(pageTargetIdFromUrl('ws://127.0.0.1:9333/devtools/page/DEAD-BEEF?x=1'), 'DEAD-BEEF');
+  assert.strictEqual(pageTargetIdFromUrl('/devtools/browser/xyz'), null, 'browser-level no es page');
+  assert.strictEqual(pageTargetIdFromUrl(''), null);
+  assert.strictEqual(pageTargetIdFromUrl(undefined), null);
 });
 
 test('createInputTap ignora un Input.dispatchMouseEvent sin coordenadas', () => {

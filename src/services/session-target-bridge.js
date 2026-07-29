@@ -58,6 +58,19 @@ class SessionTargetBridge {
   }
 
   /**
+   * Resuelve la sesión-overlay directamente por targetId global. Lo usan los
+   * tools custom, cuyo túnel /devtools/page/<targetId> da el targetId sin pasar
+   * por un sessionId de cliente.
+   * @param {string} targetId
+   * @returns {string|null} sessionId_overlay, o null si no hay vínculo.
+   */
+  resolveOverlayByTarget(targetId) {
+    if (!targetId) return null;
+    const overlaySession = this._targetToOverlay.get(targetId);
+    return overlaySession === undefined ? null : overlaySession;
+  }
+
+  /**
    * Resuelve la sesión-overlay que corresponde a un sessionId del cliente.
    * @param {string} clientSessionId
    * @returns {string|null} sessionId_overlay, o null si no hay vínculo conocido.

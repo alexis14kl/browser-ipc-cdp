@@ -174,13 +174,17 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000, 
     const y = Math.round(evt.y || 0);
     const expr = `window.__clAiPointer&&window.__clAiPointer(${JSON.stringify(type)},${x},${y})`;
 
-    const overlaySession = bridge.resolveOverlaySession(evt.sessionId);
+    // Preferir el targetId (tools custom, túnel /devtools/page/<id>); si no,
+    // el sessionId del cliente (tools estándar flatten). Los dos apuntan al
+    // mismo target global vía el bridge.
+    const overlaySession = bridge.resolveOverlayByTarget(evt.targetId)
+      || bridge.resolveOverlaySession(evt.sessionId);
     if (overlaySession && injectedSessions.has(overlaySession)) {
       draw(expr, overlaySession);   // ruteo preciso: solo la pestaña activa
       return;
     }
-    // Fallback: sin vínculo (frame sin sessionId, o attach aún no visto) →
-    // broadcast como antes, para no perder el feedback visual.
+    // Fallback: sin vínculo (sin targetId ni sessionId resoluble, o attach aún
+    // no visto) → broadcast como antes, para no perder el feedback visual.
     for (const sessionId of injectedSessions) draw(expr, sessionId);
   }
 

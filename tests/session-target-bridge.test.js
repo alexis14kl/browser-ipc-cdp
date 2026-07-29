@@ -53,6 +53,14 @@ test('clearOverlay olvida el lado overlay pero conserva el lado cliente', () => 
   assert.strictEqual(b.resolveOverlaySession('CL1'), 'OV2');
 });
 
+test('resolveOverlayByTarget resuelve directo por targetId (vía tools custom)', () => {
+  const b = new SessionTargetBridge();
+  b.linkOverlay('OV1', 'T1');
+  assert.strictEqual(b.resolveOverlayByTarget('T1'), 'OV1');
+  assert.strictEqual(b.resolveOverlayByTarget('T2'), null);
+  assert.strictEqual(b.resolveOverlayByTarget(undefined), null);
+});
+
 test('link ignora argumentos vacíos (defensivo)', () => {
   const b = new SessionTargetBridge();
   b.linkOverlay('', 'T1'); b.linkOverlay('OV1', '');

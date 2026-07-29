@@ -259,6 +259,40 @@ test('overlay: rutea el click SOLO a la pestaña que la IA usa (no broadcast)', 
   }
 });
 
+test('overlay: rutea por targetId cuando el Input no trae sessionId (tools custom)', { skip: NO_WS }, async () => {
+  const browser = await fakeBrowser();
+  const overlay = createCursorOverlay({
+    resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: browser.wsUrl } }),
+    log: () => {},
+    source: OVERLAY_SOURCE,
+  });
+  try {
+    overlay.start();
+    await waitFor(() => browser.received.some((m) => m.method === 'Target.setAutoAttach'), { timeoutMs: 4000 });
+    browser.emitPage('OV_A', 'TA');
+    browser.emitPage('OV_B', 'TB');
+    await waitFor(() => ['OV_A', 'OV_B'].every((s) =>
+      browser.received.some((m) => m.sessionId === s && m.method === 'Runtime.evaluate')), { timeoutMs: 4000 });
+
+    const before = browser.received.length;
+    // El _cdp-caller manda Input SIN sessionId, pero el proxy adjunta el
+    // targetId del túnel (/devtools/page/TB). Debe rutear solo a OV_B.
+    overlay.showAiInput({ type: 'mousePressed', x: 9, y: 9, targetId: 'TB' });
+
+    await waitFor(() => browser.received.slice(before).some(
+      (m) => m.method === 'Runtime.evaluate' && /__clAiPointer/.test(m.params?.expression || '')
+    ), { timeoutMs: 3000 });
+
+    const pointerMsgs = browser.received.slice(before).filter(
+      (m) => m.method === 'Runtime.evaluate' && /__clAiPointer/.test(m.params?.expression || ''));
+    assert.strictEqual(pointerMsgs.length, 1, 'debe dibujar en UNA sola sesión');
+    assert.strictEqual(pointerMsgs[0].sessionId, 'OV_B', 'targetId TB → OV_B');
+  } finally {
+    overlay.close();
+    await browser.close();
+  }
+});
+
 test('overlay: sin vínculo cliente cae a broadcast (degradación segura)', { skip: NO_WS }, async () => {
   const browser = await fakeBrowser();
   const overlay = createCursorOverlay({

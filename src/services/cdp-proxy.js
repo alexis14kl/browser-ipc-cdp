@@ -20,7 +20,7 @@
 const http = require('http');
 const net = require('net');
 const { execFile } = require('child_process');
-const { createInputTap, createTargetTap } = require('./ws-tap');
+const { createInputTap, createTargetTap, pageTargetIdFromUrl } = require('./ws-tap');
 const { getPlatformId } = require('../platform');
 
 const PROXY_HOST = '127.0.0.1';
@@ -87,7 +87,7 @@ async function reclaimPort(port, log) {
  * @param {{port: number, version: object|null}|null} [opts.initialBackend] - Backend ya resuelto (cache inicial).
  * @param {() => Promise<{port: number, version: object|null}|null>} opts.resolveBackend - Re-resuelve el backend. Debe devolverlo YA verificado (vivo) o null.
  * @param {(backend: {port: number, version: object|null}, proxyPort: number) => void} [opts.onBackendChange] - Se dispara en cada resolución exitosa (incluido el backend inicial).
- * @param {(evt: {type: string, x: number, y: number, button?: string, sessionId?: string}) => void} [opts.onClientInput] - Se dispara por cada Input.dispatchMouseEvent que el cliente (chrome-devtools-mcp) manda por el túnel. SOLO-OBSERVACIÓN.
+ * @param {(evt: {type: string, x: number, y: number, button?: string, sessionId?: string, targetId?: string}) => void} [opts.onClientInput] - Se dispara por cada Input.dispatchMouseEvent que el cliente manda por el túnel. Incluye targetId si el túnel es de una página concreta (/devtools/page/<id>). SOLO-OBSERVACIÓN.
  * @param {(link: {sessionId: string, targetId: string}) => void} [opts.onClientAttach] - Vínculo sesión↔target que el navegador anuncia al cliente (Target.attachedToTarget, type page). Permite rutear el overlay a la pestaña correcta.
  * @param {(link: {sessionId: string}) => void} [opts.onClientDetach] - El cliente soltó una pestaña (Target.detachedFromTarget).
  * @param {(msg: string) => void} opts.log
@@ -200,7 +200,12 @@ async function startProxy({ preferredPort, initialBackend = null, resolveBackend
         // sigue moviendo los bytes tal cual). Extrae los Input.dispatchMouseEvent
         // de la IA para el overlay. Nunca escribe de vuelta al túnel.
         if (onClientInput) {
-          const tap = createInputTap(onClientInput);
+          // Si el túnel es de una página concreta (/devtools/page/<targetId>,
+          // como hace el _cdp-caller de los tools custom), ese targetId es la
+          // pestaña dueña de TODOS los Input de este socket. Lo adjuntamos para
+          // rutear el overlay aunque el frame no traiga sessionId.
+          const targetId = pageTargetIdFromUrl(req.url);
+          const tap = createInputTap((evt) => onClientInput(targetId ? { ...evt, targetId } : evt));
           socket.on('data', (c) => { try { tap(c); } catch {} });
         }
         // Tap del sentido opuesto (backend→cliente): los eventos Target.*
