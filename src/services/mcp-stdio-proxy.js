@@ -18,7 +18,7 @@
 
 const { createInterface } = require('readline');
 
-function createMcpStdioProxy({ tools, input, output, child, log = () => {}, instructions = '' }) {
+function createMcpStdioProxy({ tools, input, output, child, log = () => {}, instructions = '', beforeExit = null }) {
   // Lookup rápido por nombre
   const toolMap = new Map(tools.map(t => [t.name, t]));
   // IDs de tools/list e initialize enviados al hijo pendientes de respuesta
@@ -119,9 +119,16 @@ function createMcpStdioProxy({ tools, input, output, child, log = () => {}, inst
       writeMsg(output, msg);
     });
 
-    // Propagar exit/error del proceso hijo
-    child.on('exit',  code  => process.exit(code ?? 0));
-    child.on('error', err   => { log(`[mcp-proxy] spawn error: ${err.message}`); process.exit(1); });
+    // Propagar exit/error del proceso hijo. Antes de salir corre beforeExit: es
+    // la ruta de muerte MÁS común (el host cierra el MCP → el hijo termina) y
+    // process.exit() no ejecuta nada, así que sin esto el navegador se queda con
+    // el dominio Fetch habilitado y requests pausadas que nadie reanuda.
+    const exitAfterCleanup = async (code) => {
+      if (beforeExit) { try { await beforeExit(); } catch (e) { log(`[mcp-proxy] cleanup: ${e.message}`); } }
+      process.exit(code);
+    };
+    child.on('exit',  code  => { exitAfterCleanup(code ?? 0); });
+    child.on('error', err   => { log(`[mcp-proxy] spawn error: ${err.message}`); exitAfterCleanup(1); });
   }
 
   return { start };

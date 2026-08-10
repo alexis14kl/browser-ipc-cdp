@@ -310,3 +310,42 @@ frameworks. (4) Se añaden por el proxy (`mcp-stdio-proxy.js` enruta `tools/call
 nombre), sin tocar el vendor ni los 4 canales. `tests/interact.test.js`: 10 casos
 con `caller` mockeado (buscar, clickear en coords, no-op sin match, navigate
 ok/soft-timeout/error, fill simple/lote/sin-args).
+
+## 13. Fetch no puede sobrevivir al proceso — handler antes del enable + shutdown (v3.14.4–3.15.0)
+
+Síntoma reportado: *a veces*, al usar el MCP, el navegador quedaba **sin
+internet** — una pestaña a medio cargar, sin error en consola ni en el log.
+
+Dos causas, las dos en la ruta del dominio Fetch:
+
+**1. El listener se registraba DESPUÉS del `Fetch.enable`.** `createWsFrameDecoder`
+procesa TODOS los frames completos de un chunk TCP de forma síncrona, y la
+continuación de un `await` es un microtask: corre recién cuando ese callback de
+`data` termina. Si el navegador manda la respuesta del `enable` y la primera
+ráfaga de `Fetch.requestPaused` en el MISMO chunk —lo normal al activar Fetch
+sobre una página cargando—, esos eventos se despachan sin handler y
+`cdp-session.dispatch` los descarta (no hay `else`). Nadie manda
+`Fetch.continueRequest`: esas requests quedan pausadas para siempre. Intermitente
+porque depende de cómo se partan los chunks.
+
+Fix: `session.on('Fetch.requestPaused', …)` **antes** del `send('Fetch.enable')`.
+No tiene costo — el navegador no emite el evento hasta procesar el enable.
+`tests/interceptor.test.js` reproduce la carrera con un navegador falso que manda
+enable-response + 2 `requestPaused` en un solo `write` (con el orden viejo el test
+falla con "llegaron 0").
+
+**2. Morir dejaba el Fetch habilitado.** `stop()` solo se llamaba desde
+`clear_request_interception`, y `process.exit()` no ejecuta nada. Las dos rutas de
+muerte reales —señal del host MCP, y el hijo `chrome-devtools-mcp` que termina—
+salían sin revertir.
+
+| Pieza | Qué hace |
+|---|---|
+| `services/shutdown.js` | Registro de limpiezas: `add(name, fn)`, `run(reason)` idempotente (las dos rutas pueden dispararlo a la vez), presupuesto de 1,5s (una limpieza colgada no puede impedir la salida), `install()` para SIGINT/SIGTERM. `process.on`/`process.exit` por inyección → testeable sin señales reales. |
+| `tools/index.js` | Registra los 5 servicios con sesión persistente (interceptor, cdp-fetch, stealth, console, network-monitor), cada uno con guard `isActive()` → sin ruido si nadie usó esos tools. |
+| `mcp-stdio-proxy.js` / `mcp-controller.js` | `beforeExit` se ejecuta antes de propagar la salida del hijo (la ruta de muerte más común), en ambos modos (con y sin tools custom). |
+| `brave_mcp_launcher.js` | Composition root: crea el shutdown con los seams reales, engancha señales y suma el `cursorOverlay.close()`. |
+
+Regla que queda: **todo servicio con sesión CDP persistente se registra en el
+shutdown**. Si deja overrides en el navegador (Fetch, emulation, headers), morir
+sin revertir es un bug visible para el usuario, no un detalle interno.

@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { createMcpStdioProxy } = require('../services/mcp-stdio-proxy');
 
-function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverlay = null, customToolsFactory = null, instructions = '', env = process.env, argv = process.argv }) {
+function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverlay = null, customToolsFactory = null, instructions = '', beforeExit = null, env = process.env, argv = process.argv }) {
   function resolveChromeDevtoolsMcpBin() {
     try {
       return require.resolve('chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js');
@@ -131,18 +131,24 @@ function createMcpController({ cdp, startProxy, cdpInfo, log, isWin, cursorOverl
     });
 
     if (customTools.length > 0) {
-      const proxy = createMcpStdioProxy({
+      const stdioProxy = createMcpStdioProxy({
         tools:  customTools,
         input:  process.stdin,
         output: process.stdout,
         child,
         log,
         instructions,
+        beforeExit,
       });
-      proxy.start();
+      stdioProxy.start();
     } else {
-      child.on('exit',  (code) => process.exit(code || 0));
-      child.on('error', (e)    => { log(`spawn error: ${e.message}`); process.exit(1); });
+      // Modo legacy (sin tools custom): misma limpieza antes de salir.
+      const exitAfterCleanup = async (code) => {
+        if (beforeExit) { try { await beforeExit(); } catch (e) { log(`cleanup: ${e.message}`); } }
+        process.exit(code);
+      };
+      child.on('exit',  (code) => { exitAfterCleanup(code || 0); });
+      child.on('error', (e)    => { log(`spawn error: ${e.message}`); exitAfterCleanup(1); });
     }
   }
 

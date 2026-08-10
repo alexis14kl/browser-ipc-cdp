@@ -1,7 +1,7 @@
 {
   "name": "browser-ipc-cdp",
   "displayName": "Browser IPC + CDP (Brave / Chrome / Edge)",
-  "version": "3.14.4",
+  "version": "3.15.0",
   "description": "Controla tu navegador Chromium real (Brave/Chrome/Edge) desde Claude Code vía IPC + CDP dinámico. Un proxy en puerto fijo re-resuelve el puerto real del navegador en cada conexión.",
   "author": {
     "name": "Alexis Malambo",

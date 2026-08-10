@@ -34,6 +34,7 @@ const { OVERLAY_SOURCE } = require('./src/views/overlay-script');
 const { createMcpController } = require('./src/controllers/mcp-controller');
 const { createCustomTools }   = require('./src/tools');
 const { MCP_INSTRUCTIONS }    = require('./src/views/mcp-instructions');
+const { createShutdown }      = require('./src/services/shutdown');
 
 const { checkForUpdate, installedVersion } = require('./src/services/update');
 
@@ -77,6 +78,17 @@ const cursorOverlay = (cursorFlag !== '0' && cursorFlag !== 'false')
   ? createCursorOverlay({ resolve: () => cdp.resolve(), log, source: OVERLAY_SOURCE })
   : null;
 
+// Limpieza al morir: revierte lo que los tools dejaron puesto en el navegador
+// (sobre todo Fetch.enable, que deja requests pausadas colgadas si nadie lo
+// deshabilita). Cubre las dos rutas: señal del host MCP e exit del hijo.
+const shutdown = createShutdown({
+  log,
+  on:   (event, handler) => process.on(event, handler),
+  exit: (code) => process.exit(code),
+});
+if (cursorOverlay) shutdown.add('overlay', () => cursorOverlay.close());
+shutdown.install();
+
 const controller = createMcpController({
   cdp,
   startProxy,
@@ -88,7 +100,9 @@ const controller = createMcpController({
   cursorOverlay,
   // Factory de tools custom: recibe browserUrl (conocido en runtime dentro de
   // run()) y devuelve el array de tools a inyectar via McpStdioProxy.
-  customToolsFactory: ({ browserUrl }) => createCustomTools({ browserUrl, log }),
+  customToolsFactory: ({ browserUrl }) => createCustomTools({ browserUrl, log, shutdown }),
+  // Se ejecuta antes de propagar la salida del hijo chrome-devtools-mcp.
+  beforeExit: () => shutdown.run('mcp-exit'),
   // Guía operativa que el proxy anexa al `initialize`. SOLO en modo bundle
   // (.mcpb de Desktop), que no tiene la skill mcp-brave; en Claude Code el
   // flujo queda idéntico al de hoy (la skill sigue siendo la única fuente).

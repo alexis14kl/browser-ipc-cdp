@@ -31,10 +31,16 @@ const { createCdpConsole }          = require('../services/cdp-console');
 const { createCdpNetworkMonitor }   = require('../services/cdp-network-monitor');
 
 /**
- * @param {{ browserUrl: string, log?: (msg: string) => void }} opts
+ * @param {object} opts
+ * @param {string} opts.browserUrl
+ * @param {(msg: string) => void} [opts.log]
+ * @param {{ add: (name: string, fn: () => any) => void }} [opts.shutdown] - Registro
+ *   de limpiezas (services/shutdown). Los servicios con sesión CDP persistente se
+ *   apuntan ahí para que morir NO deje el navegador con Fetch habilitado (requests
+ *   pausadas que nadie reanuda). Se pasa solo desde el composition root.
  * @returns {Array<{ name, description, inputSchema, handler }>}
  */
-function createCustomTools({ browserUrl, log = () => {} }) {
+function createCustomTools({ browserUrl, log = () => {}, shutdown = null }) {
   const caller          = createCdpCaller({ browserUrl });
   const interceptor     = createCdpInterceptor({ browserUrl, log });
   const coverage        = createCdpCoverage({ browserUrl, log });
@@ -61,6 +67,21 @@ function createCustomTools({ browserUrl, log = () => {} }) {
     ...createNetworkMonitorTools({ networkMonitor }),
     ...createSecurityTools({ caller, stealth, fetch: cdpFetch }),
   ];
+
+  // Limpieza al morir. El guard por isActive() evita ruido en el caso normal
+  // (nadie usó estos tools) y hace la limpieza barata: solo se revierte lo que
+  // de verdad quedó puesto en el navegador.
+  if (shutdown) {
+    for (const [name, svc, stop] of [
+      ['interceptor',     interceptor,    () => interceptor.stop()],     // Fetch.disable
+      ['cdp-fetch',       cdpFetch,       () => cdpFetch.disable()],     // Fetch.disable
+      ['stealth',         stealth,        () => stealth.stop()],         // quita el script inyectado
+      ['console',         consoleSvc,     () => consoleSvc.stop()],      // cierra la sesión
+      ['network-monitor', networkMonitor, () => networkMonitor.stop()],  // cierra la sesión
+    ]) {
+      shutdown.add(name, () => (svc.isActive() ? stop() : undefined));
+    }
+  }
 
   log(`[custom-tools] ${tools.length} tools registrados: ${tools.map(t => t.name).join(', ')}`);
   return tools;
