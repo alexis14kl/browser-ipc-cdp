@@ -14,6 +14,28 @@ Despues `/mcp` en Claude Code y listo. El wrapper resuelve el puerto dinamico so
 
 ---
 
+## Novedades
+
+### v3.15.0 — el navegador ya no se queda "sin internet"
+
+Si alguna vez, usando el MCP, **una pestaña se quedaba a medio cargar** (sin error en consola, sin nada en el log) y parecia que Brave habia perdido internet: eso era un bug, y esta arreglado. Actualiza con:
+
+```bash
+npx -y browser-ipc-cdp@latest    # y reconecta con /mcp
+```
+
+Eran dos causas, las dos en la intercepcion de requests (`setup_request_interception`, `mock_api`, `block_resources`, `capture_payloads`, `add_auth_header`, `redirect_to_local`, `throttle_api`):
+
+1. **Requests pausadas que nadie reanudaba.** Al activar la intercepcion, el navegador puede mandar la confirmacion y la primera rafaga de requests pausadas juntas; el manejador todavia no estaba escuchando y esas requests se quedaban esperando para siempre. Era intermitente porque dependia del timing de la red local. → El manejador ahora se registra **antes** de activar la intercepcion.
+
+2. **Cerrar el MCP dejaba la intercepcion puesta.** Si el MCP moria (cerrar Claude Code, reiniciar la sesion) con la intercepcion activa, nunca se desactivaba en el navegador. → Ahora hay una limpieza que corre al salir por cualquier via y revierte todo lo que los tools hayan dejado puesto: intercepcion, stealth, monitores y el overlay.
+
+Si te vuelve a pasar con una version anterior, el remedio manual es llamar `clear_request_interception` o cerrar la pestaña.
+
+Detalle tecnico completo: [`docs/ARQUITECTURA-MVC.md`](docs/ARQUITECTURA-MVC.md) seccion 13.
+
+---
+
 ## Instalacion
 
 `browser-ipc-cdp` se puede usar de **tres** formas. Elige la que prefieras.
