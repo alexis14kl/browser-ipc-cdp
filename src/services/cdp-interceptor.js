@@ -230,8 +230,15 @@ function createCdpInterceptor({ browserUrl, log = () => {} }) {
       urlPattern:   r.urlPattern,
       requestStage: r.action === 'modify_response' ? 'Response' : 'Request',
     }));
-    await session.send('Fetch.enable', { patterns });
+    // El listener va ANTES del enable: el decoder procesa TODOS los frames de un
+    // chunk TCP de forma síncrona, así que si el navegador manda la respuesta del
+    // enable y la primera ráfaga de requestPaused en el mismo chunk, esos eventos
+    // se despachan antes de que corra la continuación del await. Sin handler,
+    // dispatch los descarta y esas requests quedan pausadas para siempre (la
+    // pestaña se queda a medio cargar, sin error). Registrar antes no tiene costo:
+    // el navegador no emite requestPaused hasta que el enable se procesa.
     session.on('Fetch.requestPaused', handlePaused);
+    await session.send('Fetch.enable', { patterns });
 
     log(`[interceptor] activo — ${rules.length} regla(s): ${rules.map(r => r.name).join(', ')}`);
   }

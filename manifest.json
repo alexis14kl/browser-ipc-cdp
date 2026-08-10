@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "browser-ipc-cdp",
   "display_name": "Browser IPC + CDP (Brave / Chrome / Edge)",
-  "version": "3.14.3",
+  "version": "3.14.4",
   "description": "Controla tu navegador Chromium real (Brave, Chrome o Edge) desde Claude por IPC + CDP dinámico. Un proxy en puerto fijo re-resuelve el puerto real del navegador en cada conexión, así el puerto nunca cambia para el cliente.",
   "long_description": "Conecta Claude Desktop a tu navegador Chromium REAL (con tus sesiones, cookies y extensiones) por el Chrome DevTools Protocol. El launcher resuelve o auto-lanza el navegador con depuración remota y expone chrome-devtools-mcp detrás de un proxy CDP en puerto fijo (9333 por defecto) que re-resuelve el puerto real en cada conexión: nunca hay que reiniciar el MCP por un cambio de puerto. Incluye ~60 herramientas extra sobre CDP (cookies, storage, red, intercepción, cobertura, PDF, fingerprint/stealth, seguridad) además de las de navegación e interacción de chrome-devtools-mcp.",
   "author": {
