@@ -7,13 +7,20 @@ const { SessionTargetBridge } = require('./session-target-bridge');
  * en las páginas del navegador vía CDP, sin pasos manuales, y rutea cada click
  * de la IA a la pestaña que realmente está usando (vía SessionTargetBridge).
  *
- * Abre su propio WebSocket al endpoint browser-level del navegador y:
+ * Abre su propio WebSocket al endpoint browser-level del navegador y, cuando
+ * la IA empieza a interactuar (instalación PEREZOSA, ver abajo):
  *   - Page.addScriptToEvaluateOnNewDocument → el overlay corre al inicio de
  *     cada documento nuevo (sobrevive navegación y recarga).
  *   - Runtime.evaluate del mismo source → lo instala también en las páginas
- *     YA abiertas en el momento de conectar.
- *   - Target.setDiscoverTargets + attach por target de tipo "page" (flatten):
- *     cubre pestañas nuevas que aparezcan después.
+ *     YA abiertas en el momento de instalar.
+ *   - Target.setAutoAttach por target de tipo "page" (flatten): cubre
+ *     pestañas nuevas que aparezcan después.
+ *
+ * Instalación perezosa: conectar el WS es invisible para las páginas; el
+ * attach + inyección solo ocurre al primer evento de la IA y se RETIRA tras
+ * idleMs sin actividad de la IA. Un attach permanente dejaba sesiones CDP con
+ * Runtime.evaluate sobre cada página que el usuario navegaba a mano — los
+ * anti-bot (Cloudflare) detectan exactamente esos artefactos.
  *
  * Usa el WebSocket nativo de Node (>=21) — sin dependencias externas.
  * Es best-effort y NO bloqueante: si algo falla, el MCP sigue igual.
@@ -24,7 +31,7 @@ const { SessionTargetBridge } = require('./session-target-bridge');
  * @param {string} deps.source  El JS del overlay (OVERLAY_SOURCE).
  * @param {SessionTargetBridge} [deps.bridge]  Traductor sessionId_cliente↔overlay.
  */
-function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000, bridge = new SessionTargetBridge() }) {
+function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000, idleMs = 120000, bridge = new SessionTargetBridge() }) {
   let ws = null;
   let nextId = 1;
   const pending = new Map();       // id → resolve
@@ -32,6 +39,14 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000, 
   let stopped = false;
   let retryTimer = null;
   let lastMoveAt = 0;
+  // Instalación perezosa: el auto-attach + inyección solo ocurre mientras la IA
+  // interactúa. Con attach permanente, cada página que el USUARIO navegaba
+  // llevaba sesiones CDP con Runtime.evaluate encima — exactamente los
+  // artefactos que los anti-bot (Cloudflare) detectan.
+  let installed = false;
+  let installing = false;
+  let lastAiAt = 0;
+  let idleTimer = null;
 
   function send(method, params = {}, sessionId) {
     const id = nextId++;
@@ -138,16 +153,59 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000, 
       bridge.clearOverlay();        // las sesiones-overlay ya no existen; el lado cliente lo mantiene el proxy
       failAllPending('ws cerrado'); // libera los await colgados
       ws = null;
-      scheduleRetry(); // Brave cerró/reinició → reconectar y reinstalar
+      installed = false;
+      installing = false;
+      scheduleRetry(); // Brave cerró/reinició → reconectar; se reinstala al próximo evento de la IA
     });
 
+    // La instalación (setAutoAttach + inyección) se difiere al primer evento de
+    // la IA (install()): mantener el WS abierto es invisible para las páginas.
+    log('overlay: conectado (instalación diferida al primer uso de la IA)');
+  }
+
+  // Adjunta e inyecta en todas las pestañas. Solo mientras la IA opera.
+  async function install() {
+    if (installed || installing || !ws) return;
+    installing = true;
     try {
       // Auto-attach a cada page target (actuales y futuros), en modo flatten.
       await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-      log('overlay: instalado (cursor visible en cada página)');
+      installed = true;
+      startIdleWatch();
+      log('overlay: instalado (cursor visible mientras la IA interactúa)');
     } catch (e) {
       log(`overlay: setAutoAttach falló (${e.message})`);
+    } finally {
+      installing = false;
     }
+  }
+
+  // Retira el auto-attach y suelta todas las sesiones cuando la IA lleva
+  // idleMs sin interactuar: las pestañas del usuario quedan limpias de CDP.
+  async function uninstall() {
+    if (!installed || !ws) return;
+    installed = false;
+    try {
+      await send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: true });
+    } catch {}
+    for (const sessionId of injectedSessions) {
+      send('Target.detachFromTarget', { sessionId }).catch(() => {});
+    }
+    injectedSessions.clear();
+    bridge.clearOverlay();
+    log('overlay: retirado por inactividad de la IA');
+  }
+
+  function startIdleWatch() {
+    if (idleTimer) return;
+    // Chequeo a medio idleMs (tope 15s): granularidad proporcional y testeable.
+    const checkMs = Math.min(15000, Math.max(50, Math.floor(idleMs / 2)));
+    idleTimer = setInterval(() => {
+      if (installed && Date.now() - lastAiAt > idleMs) uninstall();
+      if (!installed) { clearInterval(idleTimer); idleTimer = null; }
+    }, checkMs);
+    // No mantener vivo el proceso solo por este timer.
+    if (idleTimer.unref) idleTimer.unref();
   }
 
   function draw(expr, sessionId) {
@@ -161,7 +219,13 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000, 
   // misma pestaña. Sin vínculo conocido, cae a broadcast (degradación segura).
   // Fire-and-forget; los mouseMoved se estrangulan para no inundar el WS.
   function showAiInput(evt) {
-    if (!ws || !evt || injectedSessions.size === 0) return;
+    if (!ws || !evt) return;
+    lastAiAt = Date.now();
+    // Primer evento de la IA (o vuelta tras un uninstall): instalar ahora.
+    // Fire-and-forget; los primeros mouseMoved pueden perderse mientras el
+    // attach termina — el cursor aparece una fracción de segundo después.
+    if (!installed) { install(); }
+    if (injectedSessions.size === 0) return;
     const type = evt.type;
     if (type === 'mouseMoved') {
       const now = Date.now();
@@ -202,6 +266,8 @@ function createCursorOverlay({ resolve, log = () => {}, source, retryMs = 4000, 
   function close() {
     stopped = true;
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    if (idleTimer) { clearInterval(idleTimer); idleTimer = null; }
+    installed = false;
     try { ws && ws.close(); } catch {}
     ws = null;
   }

@@ -75,7 +75,9 @@ const cdp = createCdpService({
 // booleano user_config.cursor_overlay → 'true'/'false'). Unset = ON (default).
 const cursorFlag = process.env.BROWSER_CDP_CURSOR;
 const cursorOverlay = (cursorFlag !== '0' && cursorFlag !== 'false')
-  ? createCursorOverlay({ resolve: () => cdp.resolve(), log, source: OVERLAY_SOURCE })
+  // launch:false — el overlay es un seguidor pasivo. Con el default (launch:true)
+  // su retry de 4s relanzaba el navegador cada vez que el usuario lo cerraba.
+  ? createCursorOverlay({ resolve: () => cdp.resolve({ launch: false }), log, source: OVERLAY_SOURCE })
   : null;
 
 // Limpieza al morir: revierte lo que los tools dejaron puesto en el navegador
