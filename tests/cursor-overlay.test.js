@@ -3,10 +3,13 @@
  * un navegador FALSO (un WebSocket server que imita los mensajes CDP), sin
  * navegador real. Verifica el contrato de integración:
  *   - opt-in: sin BROWSER_CDP_CURSOR el launcher no crea el overlay
- *   - Target.setAutoAttach al conectar
+ *   - instalación PEREZOSA: conectar NO adjunta nada; Target.setAutoAttach
+ *     solo al primer evento de la IA (showAiInput)
  *   - inyección (Page.enable + addScriptToEvaluateOnNewDocument + Runtime.evaluate)
  *     al adjuntarse un target de tipo "page"
- *   - reconexión: si el WS cae, reintenta solo
+ *   - retiro por inactividad: tras idleMs sin eventos de la IA, setAutoAttach
+ *     off + detach de las sesiones (las pestañas del usuario quedan sin CDP)
+ *   - reconexión: si el WS cae, reintenta solo y se reinstala al próximo evento
  */
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -116,7 +119,7 @@ function decodeFrame(buf) {
   return data.toString('utf-8');
 }
 
-test('overlay: setAutoAttach al conectar e inyección al aparecer una página', { skip: NO_WS }, async () => {
+test('overlay: NO se instala al conectar; setAutoAttach llega con el primer evento de la IA', { skip: NO_WS }, async () => {
   const browser = await fakeBrowser();
   const overlay = createCursorOverlay({
     resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: browser.wsUrl } }),
@@ -125,12 +128,23 @@ test('overlay: setAutoAttach al conectar e inyección al aparecer una página', 
   });
   try {
     overlay.start();
-    // Debe pedir setAutoAttach al conectar
+    // Conectar es pasivo: sin evento de la IA no debe haber setAutoAttach.
+    await new Promise((r) => setTimeout(r, 400));
+    assert.ok(
+      !browser.received.some((m) => m.method === 'Target.setAutoAttach'),
+      'se instaló al conectar: la instalación debe ser perezosa'
+    );
+
+    // Primer evento de la IA → instala. Se reintenta en el poll porque el WS
+    // puede tardar en estar listo.
     const gotAutoAttach = await waitFor(
-      () => browser.received.some((m) => m.method === 'Target.setAutoAttach'),
+      () => {
+        overlay.showAiInput({ type: 'mousePressed', x: 1, y: 1 });
+        return browser.received.some((m) => m.method === 'Target.setAutoAttach');
+      },
       { timeoutMs: 4000 }
     );
-    assert.ok(gotAutoAttach, 'no envió Target.setAutoAttach');
+    assert.ok(gotAutoAttach, 'no envió Target.setAutoAttach tras el primer evento de la IA');
 
     // Simular una pestaña → debe inyectar el overlay en esa sesión
     browser.emitPage('sess-1');
@@ -190,7 +204,7 @@ test('overlay: si el WS cae a mitad de inyección, no cuelga ni fuga promesas', 
   }
 });
 
-test('overlay: se reconecta solo si la conexión CDP cae', { skip: NO_WS }, async () => {
+test('overlay: se reconecta solo si la conexión CDP cae y se reinstala al próximo evento', { skip: NO_WS }, async () => {
   const browser = await fakeBrowser();
   const overlay = createCursorOverlay({
     resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: browser.wsUrl } }),
@@ -200,16 +214,70 @@ test('overlay: se reconecta solo si la conexión CDP cae', { skip: NO_WS }, asyn
   });
   try {
     overlay.start();
-    await waitFor(() => browser.received.some((m) => m.method === 'Target.setAutoAttach'), { timeoutMs: 4000 });
+    await waitFor(() => {
+      overlay.showAiInput({ type: 'mousePressed', x: 1, y: 1 });
+      return browser.received.some((m) => m.method === 'Target.setAutoAttach');
+    }, { timeoutMs: 4000 });
     const count1 = browser.received.filter((m) => m.method === 'Target.setAutoAttach').length;
 
-    // Tirar la conexión → debe reconectar y volver a hacer setAutoAttach
+    // Tirar la conexión → debe reconectar solo y, con el siguiente evento de
+    // la IA, volver a instalarse (nuevo setAutoAttach).
     browser.dropConnection();
     const reconnected = await waitFor(
-      () => browser.received.filter((m) => m.method === 'Target.setAutoAttach').length > count1,
+      () => {
+        overlay.showAiInput({ type: 'mousePressed', x: 2, y: 2 });
+        return browser.received.filter((m) => m.method === 'Target.setAutoAttach').length > count1;
+      },
       { timeoutMs: 5000 }
     );
     assert.ok(reconnected, 'no se reconectó tras caer la conexión');
+  } finally {
+    overlay.close();
+    await browser.close();
+  }
+});
+
+test('overlay: se retira solo tras idleMs sin eventos de la IA', { skip: NO_WS }, async () => {
+  const browser = await fakeBrowser();
+  const overlay = createCursorOverlay({
+    resolve: async () => ({ port: 1, version: { webSocketDebuggerUrl: browser.wsUrl } }),
+    log: () => {},
+    source: OVERLAY_SOURCE,
+    idleMs: 300,
+  });
+  try {
+    overlay.start();
+    await waitFor(() => {
+      overlay.showAiInput({ type: 'mousePressed', x: 1, y: 1 });
+      return browser.received.some(
+        (m) => m.method === 'Target.setAutoAttach' && m.params.autoAttach === true
+      );
+    }, { timeoutMs: 4000 });
+    browser.emitPage('OV_A', 'TA');
+    await waitFor(() => browser.received.some(
+      (m) => m.sessionId === 'OV_A' && m.method === 'Runtime.evaluate'
+    ), { timeoutMs: 4000 });
+
+    // Sin más eventos de la IA: tras idleMs debe apagar el auto-attach y
+    // soltar la sesión (las pestañas del usuario quedan limpias de CDP).
+    const uninstalled = await waitFor(
+      () => browser.received.some((m) => m.method === 'Target.setAutoAttach' && m.params.autoAttach === false)
+         && browser.received.some((m) => m.method === 'Target.detachFromTarget' && m.params.sessionId === 'OV_A'),
+      { timeoutMs: 4000 }
+    );
+    assert.ok(uninstalled, 'no retiró el overlay tras la inactividad de la IA');
+
+    // Y un evento nuevo lo reinstala.
+    const reinstalled = await waitFor(
+      () => {
+        overlay.showAiInput({ type: 'mousePressed', x: 3, y: 3 });
+        return browser.received.filter(
+          (m) => m.method === 'Target.setAutoAttach' && m.params.autoAttach === true
+        ).length >= 2;
+      },
+      { timeoutMs: 4000 }
+    );
+    assert.ok(reinstalled, 'no se reinstaló con el siguiente evento de la IA');
   } finally {
     overlay.close();
     await browser.close();
@@ -225,7 +293,11 @@ test('overlay: rutea el click SOLO a la pestaña que la IA usa (no broadcast)', 
   });
   try {
     overlay.start();
-    await waitFor(() => browser.received.some((m) => m.method === 'Target.setAutoAttach'), { timeoutMs: 4000 });
+    // Instalación perezosa: hace falta un primer evento de la IA para instalar.
+    await waitFor(() => {
+      overlay.showAiInput({ type: 'mousePressed', x: 0, y: 0 });
+      return browser.received.some((m) => m.method === 'Target.setAutoAttach');
+    }, { timeoutMs: 4000 });
 
     // Dos pestañas: sesión-overlay OV_A↔targetId TA, OV_B↔TB.
     browser.emitPage('OV_A', 'TA');
@@ -268,7 +340,11 @@ test('overlay: rutea por targetId cuando el Input no trae sessionId (tools custo
   });
   try {
     overlay.start();
-    await waitFor(() => browser.received.some((m) => m.method === 'Target.setAutoAttach'), { timeoutMs: 4000 });
+    // Instalación perezosa: hace falta un primer evento de la IA para instalar.
+    await waitFor(() => {
+      overlay.showAiInput({ type: 'mousePressed', x: 0, y: 0 });
+      return browser.received.some((m) => m.method === 'Target.setAutoAttach');
+    }, { timeoutMs: 4000 });
     browser.emitPage('OV_A', 'TA');
     browser.emitPage('OV_B', 'TB');
     await waitFor(() => ['OV_A', 'OV_B'].every((s) =>
@@ -302,7 +378,11 @@ test('overlay: sin vínculo cliente cae a broadcast (degradación segura)', { sk
   });
   try {
     overlay.start();
-    await waitFor(() => browser.received.some((m) => m.method === 'Target.setAutoAttach'), { timeoutMs: 4000 });
+    // Instalación perezosa: hace falta un primer evento de la IA para instalar.
+    await waitFor(() => {
+      overlay.showAiInput({ type: 'mousePressed', x: 0, y: 0 });
+      return browser.received.some((m) => m.method === 'Target.setAutoAttach');
+    }, { timeoutMs: 4000 });
     browser.emitPage('OV_A', 'TA');
     browser.emitPage('OV_B', 'TB');
     await waitFor(() => ['OV_A', 'OV_B'].every((s) =>
